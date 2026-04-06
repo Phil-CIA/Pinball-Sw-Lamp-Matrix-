@@ -17,8 +17,10 @@
 ## Project references
 - `docs/PROJECT_STATUS.md` – current state, priorities, and open questions
 - `docs/PCB_REVIEW_CHECKLIST.md` – pre-order hardware checklist
+- `docs/GITHUB_REPO_SETUP.md` – suggested GitHub repo metadata and settings
 - `BOM/key_parts.md` – important component choices
 - `CONTRIBUTING.md` – repo workflow and update expectations
+- `SECURITY.md` – reporting guidance for risky or security-related issues
 - `CHANGELOG.md` – notable repo changes over time
 
 ## Status
