@@ -17,6 +17,7 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 - confirm the exact ESP32-C6 bring-up board/module
 - review lamp current expectations and fuse sizing
 - prepare for the first real PCB layout revision
+- standardize on a small SMT test-point footprint for logic/debug signals
 
 ## Parking lot
 - confirm whether the final firmware should stay ESP-IDF-only or also support Arduino later

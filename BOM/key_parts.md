@@ -30,3 +30,12 @@
 ## Power entry
 - TVS: (project-selected part)
 - Fuse/PTC: current design target ~1.1A–1.85A hold equivalent (confirm after measurements)
+
+## Test points / debug access
+- Recommended small SMT debug test point style:
+  - **Harwin S1751-46R** class SMT loop test point for low-current logic/debug nodes
+- Alternate approach:
+  - use simple labeled pogo pads where only fixture/probe access is needed
+- Suggested use cases:
+  - logic rails, reset, UART, shift-register control, switch-column outputs
+- Avoid using tiny logic-style SMT test points for high-current lamp paths

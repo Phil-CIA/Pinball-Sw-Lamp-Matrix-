@@ -40,3 +40,5 @@ Per row output at connector:
 ## 7) Test points
 - [ ] Add test points for: 3.3V, 5V, 18/22V, GND, S_CLK, S_LATCH, S_DATA, S_DATA_1
 - [ ] Add test points for each switch column output (post-comparator) if possible.
+- [ ] For small debug access, use a compact SMT loop test point footprint on key low-current signals.
+- [ ] Keep high-current lamp nets on appropriately sized pads / connector access, not tiny logic-only test points.
