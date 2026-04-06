@@ -1,0 +1,43 @@
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+
+# VS Code (optional)
+.vscode/
+*.code-workspace
+
+# ---- PlatformIO ----
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# ---- ESP-IDF native ----
+firmware/esp-idf-native/build/
+**/build/
+
+# ---- Arduino IDE ----
+*.elf
+*.bin
+*.map
+
+# ---- KiCad ----
+# backups / autosaves
+*~
+*.bak
+*.bck
+*.tmp
+*.kicad_sch-bak
+*.kicad_pcb-bak
+_autosave-*
+*-autosave.kicad_sch
+fp-info-cache
+
+# KiCad 3D cache (if used)
+*.step
+*.stp
+*.wrl
+
+# ---- Exports that can be regenerated (optional) ----
+# Uncomment if you prefer not to track generated outputs
+# hardware/exports/gerbers/
+# hardware/exports/bom/
