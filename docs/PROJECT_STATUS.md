@@ -7,6 +7,7 @@ This project is building a combined **8x4 lamp matrix driver** and **8x4 switch 
 ### Hardware
 - Schematic is the active source of truth
 - Key parts and review notes are captured
+- Schematic cleanup findings are tracked in `docs/SCHEMATIC_REVIEW.md`
 - `hardware/Pinball Matrix board Rev 1.kicad_pcb` is still a **placeholder**
 - First real PCB layout has **not** been started yet
 
@@ -22,10 +23,10 @@ This project is building a combined **8x4 lamp matrix driver** and **8x4 switch 
 - Key parts summary exists in `BOM/key_parts.md`
 
 ## Immediate next priorities
-1. Freeze row/column naming and connector pin assignments
-2. Finish schematic review and footprint checks
-3. Start the first routed PCB revision
-4. Bring up the real row/column hardware on the ESP32-C6 board
+1. Clear the high-priority items in `docs/SCHEMATIC_REVIEW.md`
+2. Freeze row/column naming and connector pin assignments
+3. Finish schematic review and footprint checks
+4. Start the first routed PCB revision
 
 ## Open questions to lock down
 - Final connector choice and pin numbering

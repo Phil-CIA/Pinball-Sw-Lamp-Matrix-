@@ -13,6 +13,7 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 ---
 
 ## Current next-iteration focus
+- clear the high-priority schematic items in `docs/SCHEMATIC_REVIEW.md`
 - lock down connector pin naming and numbering
 - confirm the exact ESP32-C6 bring-up board/module
 - review lamp current expectations and fuse sizing
