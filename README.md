@@ -16,6 +16,7 @@
 
 ## Project references
 - `docs/PROJECT_STATUS.md` – current state, priorities, and open questions
+- `docs/NEXT_ITERATION.md` – parking lot for ideas, assumptions, and things to revisit
 - `docs/PCB_REVIEW_CHECKLIST.md` – pre-order hardware checklist
 - `docs/GITHUB_REPO_SETUP.md` – suggested GitHub repo metadata and settings
 - `BOM/key_parts.md` – important component choices

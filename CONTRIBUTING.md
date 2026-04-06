@@ -23,4 +23,5 @@ This repository is currently in an early bring-up and design phase. The goal is 
 If you change project direction, also update:
 - `README.md`
 - `docs/PROJECT_STATUS.md`
+- `docs/NEXT_ITERATION.md` when you want to capture ideas, risks, or revisit-later notes
 - `CHANGELOG.md`
