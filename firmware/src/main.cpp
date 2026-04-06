@@ -1,25 +1,28 @@
-#include <Arduino.h>
+#include <cstdint>
+#include <cstdio>
+
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 // 74HC595 control pins (set to your wiring)
-static constexpr int PIN_SCLK  = 23; // shift clock
-static constexpr int PIN_LATCH = 24; // storage register latch
-static constexpr int PIN_DATA0 = 25; // data to first 595 (rows)
-static constexpr int PIN_DATA1 = 26; // optional: if you used a second data line
+static constexpr gpio_num_t PIN_SCLK  = GPIO_NUM_23; // shift clock
+static constexpr gpio_num_t PIN_LATCH = GPIO_NUM_24; // storage register latch
+static constexpr gpio_num_t PIN_DATA0 = GPIO_NUM_25; // data to first 595 (rows)
+static constexpr gpio_num_t PIN_DATA1 = GPIO_NUM_26; // optional second data line
 
 // Switch column inputs (post-comparator)
-static constexpr int PIN_SW_COL0 = 19;
-static constexpr int PIN_SW_COL1 = 20;
-static constexpr int PIN_SW_COL2 = 21;
-static constexpr int PIN_SW_COL3 = 22;
-
-// If you wire /OE to a GPIO, define it here and default-disable outputs until init
-// static constexpr int PIN_OE = xx;
+static constexpr gpio_num_t PIN_SW_COL0 = GPIO_NUM_19;
+static constexpr gpio_num_t PIN_SW_COL1 = GPIO_NUM_20;
+static constexpr gpio_num_t PIN_SW_COL2 = GPIO_NUM_21;
+static constexpr gpio_num_t PIN_SW_COL3 = GPIO_NUM_22;
 
 static void pulseLatch()
 {
-  digitalWrite(PIN_LATCH, HIGH);
-  delayMicroseconds(1);
-  digitalWrite(PIN_LATCH, LOW);
+  gpio_set_level(PIN_LATCH, 1);
+  esp_rom_delay_us(1);
+  gpio_set_level(PIN_LATCH, 0);
 }
 
 static void shiftOut16(uint16_t bits)
@@ -27,9 +30,9 @@ static void shiftOut16(uint16_t bits)
   // Shifts MSB first. Adjust bit order to match your schematic.
   for (int i = 15; i >= 0; --i)
   {
-    digitalWrite(PIN_SCLK, LOW);
-    digitalWrite(PIN_DATA0, (bits >> i) & 1);
-    digitalWrite(PIN_SCLK, HIGH);
+    gpio_set_level(PIN_SCLK, 0);
+    gpio_set_level(PIN_DATA0, (bits >> i) & 1U);
+    gpio_set_level(PIN_SCLK, 1);
   }
   pulseLatch();
 }
@@ -39,43 +42,62 @@ static void allOff()
   shiftOut16(0x0000);
 }
 
-void setup()
+extern "C" void app_main(void)
 {
-  Serial.begin(115200);
+  const uint64_t outputMask =
+      (1ULL << PIN_SCLK) |
+      (1ULL << PIN_LATCH) |
+      (1ULL << PIN_DATA0) |
+      (1ULL << PIN_DATA1);
 
-  pinMode(PIN_SCLK, OUTPUT);
-  pinMode(PIN_LATCH, OUTPUT);
-  pinMode(PIN_DATA0, OUTPUT);
+  gpio_config_t outputConfig = {};
+  outputConfig.pin_bit_mask = outputMask;
+  outputConfig.mode = GPIO_MODE_OUTPUT;
+  outputConfig.pull_up_en = GPIO_PULLUP_DISABLE;
+  outputConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  outputConfig.intr_type = GPIO_INTR_DISABLE;
+  gpio_config(&outputConfig);
 
-  digitalWrite(PIN_SCLK, LOW);
-  digitalWrite(PIN_LATCH, LOW);
-  digitalWrite(PIN_DATA0, LOW);
+  const uint64_t inputMask =
+      (1ULL << PIN_SW_COL0) |
+      (1ULL << PIN_SW_COL1) |
+      (1ULL << PIN_SW_COL2) |
+      (1ULL << PIN_SW_COL3);
 
-  pinMode(PIN_SW_COL0, INPUT);
-  pinMode(PIN_SW_COL1, INPUT);
-  pinMode(PIN_SW_COL2, INPUT);
-  pinMode(PIN_SW_COL3, INPUT);
+  gpio_config_t inputConfig = {};
+  inputConfig.pin_bit_mask = inputMask;
+  inputConfig.mode = GPIO_MODE_INPUT;
+  inputConfig.pull_up_en = GPIO_PULLUP_DISABLE;
+  inputConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  inputConfig.intr_type = GPIO_INTR_DISABLE;
+  gpio_config(&inputConfig);
+
+  gpio_set_level(PIN_SCLK, 0);
+  gpio_set_level(PIN_LATCH, 0);
+  gpio_set_level(PIN_DATA0, 0);
+  gpio_set_level(PIN_DATA1, 0);
 
   // Put outputs into a known safe state immediately.
   allOff();
 
-  Serial.println("Pinball matrix firmware skeleton starting...");
-}
+  std::printf("Pinball matrix ESP-IDF bring-up starting...\n");
 
-void loop()
-{
-  // Example: walk a single bit for basic bring-up
-  static uint16_t pattern = 0x0001;
-  shiftOut16(pattern);
-  pattern = (pattern << 1);
-  if (pattern == 0) pattern = 0x0001;
+  uint16_t pattern = 0x0001;
+  while (true)
+  {
+    shiftOut16(pattern);
+    pattern = static_cast<uint16_t>(pattern << 1);
+    if (pattern == 0)
+    {
+      pattern = 0x0001;
+    }
 
-  int sw0 = digitalRead(PIN_SW_COL0);
-  int sw1 = digitalRead(PIN_SW_COL1);
-  int sw2 = digitalRead(PIN_SW_COL2);
-  int sw3 = digitalRead(PIN_SW_COL3);
+    const int sw0 = gpio_get_level(PIN_SW_COL0);
+    const int sw1 = gpio_get_level(PIN_SW_COL1);
+    const int sw2 = gpio_get_level(PIN_SW_COL2);
+    const int sw3 = gpio_get_level(PIN_SW_COL3);
 
-  Serial.printf("SW_COL: %d %d %d %d\n", sw0, sw1, sw2, sw3);
-
-  delay(200);
+    std::printf("SW_COL: %d %d %d %d\n", sw0, sw1, sw2, sw3);
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
 }
