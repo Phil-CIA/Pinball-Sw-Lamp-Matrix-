@@ -21,7 +21,7 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 ## Parking lot
 - confirm whether the final firmware should stay ESP-IDF-only or also support Arduino later
 - decide if lamp column drivers need any extra protection or test points beyond the current plan
-- consider whether a dedicated `docs/PINMAP.md` should become the source of truth for signal naming
+- keep `docs/PINMAP.md` updated as the source of truth for signal naming and board-mating notes
 
 ## Assumptions to validate
 - `VNQ7E100AJTR` remains the preferred high-side row driver

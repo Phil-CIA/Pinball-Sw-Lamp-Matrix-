@@ -17,6 +17,7 @@ This project is building a combined **8x4 lamp matrix driver** and **8x4 switch 
 
 ### Documentation
 - Core repo layout and baseline docs are now in place
+- Pin and connector mapping now lives in `docs/PINMAP.md`
 - PCB review checklist exists in `docs/PCB_REVIEW_CHECKLIST.md`
 - Key parts summary exists in `BOM/key_parts.md`
 
