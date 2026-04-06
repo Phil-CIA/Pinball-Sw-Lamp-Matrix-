@@ -10,16 +10,23 @@
 
 ## Repo layout
 - `hardware/` – KiCad schematic/PCB and exports
-- `firmware/` – PlatformIO (Arduino + ESP-IDF environments)
-- `docs/` – design notes and PCB review checklist
+- `firmware/` – PlatformIO / ESP-IDF bring-up firmware
+- `docs/` – design notes, project status, and PCB review checklist
 - `BOM/` – key part numbers and alternates
+
+## Project references
+- `docs/PROJECT_STATUS.md` – current state, priorities, and open questions
+- `docs/PCB_REVIEW_CHECKLIST.md` – pre-order hardware checklist
+- `BOM/key_parts.md` – important component choices
+- `CONTRIBUTING.md` – repo workflow and update expectations
+- `CHANGELOG.md` – notable repo changes over time
 
 ## Status
 Work-in-progress redesign (started 2026-04).
 
 - **Schematic:** active design work in progress
 - **PCB layout:** not created yet; current `.kicad_pcb` file is only a placeholder
-- **Firmware:** starter ESP32-C6 bring-up scaffold added
+- **Firmware:** verified ESP32-C6 ESP-IDF bring-up scaffold added
 
 ## Next Steps
 - finalize the schematic and connector pinout

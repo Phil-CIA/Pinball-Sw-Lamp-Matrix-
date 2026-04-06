@@ -1,0 +1,22 @@
+* text=auto eol=lf
+
+# KiCad project files
+*.kicad_sch text
+*.kicad_pcb text
+*.kicad_pro text
+*.kicad_prl text
+
+# Markdown / config
+*.md text
+*.yml text
+*.yaml text
+*.ini text
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pdf binary
+*.zip binary
