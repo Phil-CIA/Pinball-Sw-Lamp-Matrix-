@@ -1,6 +1,6 @@
 # Schematic Review and Cleanup Notes
 
-Review date: **2026-04-06**
+Review dates: **2026-04-06** and follow-up **2026-04-07**
 
 This note captures the current schematic cleanup work that should be finished **before spending time routing the PCB**.
 
@@ -9,6 +9,14 @@ Scope reviewed:
 - repo documentation and footprint/library setup
 
 > This is a schematic/design review note based on the checked-in KiCad source and repo contents. It should be used as the cleanup guide before layout work continues.
+
+---
+
+## Follow-up review status (2026-04-07)
+- Fresh repo check showed `git status -sb` clean.
+- The currently saved KiCad files in `hardware/` show `LastWriteTime` around **2026-04-06 7:28 AM**, so the repo copy available for review is **not within the last hour**.
+- An updated netlist is **not required** for this text/design review, but a saved netlist/ERC export would help with deeper connectivity cross-checking later.
+- Because no newer KiCad save was visible in the repo copy, the block-by-block notes below apply to the **current saved schematic version**.
 
 ---
 
@@ -44,6 +52,43 @@ Scope reviewed:
 - **Re-check bulk capacitor assumptions**
   - verify voltage rating, technology, and effective capacitance on the 18V lamp rail
 
+## Block-by-block design review
+
+### 1) Power entry and protection
+- Good signs: PTC fuses, TVS parts, and bulk/decoupling capacitors are present in the schematic.
+- Before routing, confirm real footprints for `F1` / `F2`, verify the bulk-cap voltage margin on the lamp rail, and keep the TVS return path physically short and wide.
+- Keep the fuse upstream of the TVS in the final PCB layout.
+
+### 2) Lamp row driver block (`VNQ7E100AJTR`)
+- The 8-row high-side architecture still fits the intended lamp-matrix design.
+- Confirm EPAD grounding, strap-pin defaults, and any unused-channel handling before layout.
+- Keep the row outputs and connector naming aligned with `docs/PINMAP.md`.
+
+### 3) Lamp column sink block
+- The low-side sink approach still looks appropriate for the matrix concept.
+- Main cleanup item: confirm package/current capability and use consistent transistor-style references for MOSFET parts.
+- Verify any gate resistors, pulldowns, and EMI/ringing mitigation parts you want stuffed by default.
+
+### 4) Switch input comparator block (`LMV393` + clamps)
+- The comparator-based switch readback approach is still reasonable for the design.
+- Lock the final `LMV393` package footprint, confirm threshold/resistor values, and verify clamp orientation and noise margin.
+- Keep the comparator outputs clearly referenced to the 3.3V logic side.
+
+### 5) Shift-register / logic-output block (`74HC595`)
+- This block still matches the firmware bring-up concept.
+- `/OE` and `/MR` should have explicit boot-safe defaults so the lamps do not glitch during startup.
+- Normalize the control-net labels to `SR_SCLK`, `SR_LATCH`, `SR_DATA0`, and `SR_DATA1`.
+
+### 6) Controller / dev-board block (`U2`)
+- This remains a top cleanup item because the symbol name and assigned footprint do not yet agree.
+- Confirm whether the design is targeting a temporary dev board, a module footprint, or a board-to-board control header.
+- If GPIO assignments change, keep `docs/PINMAP.md` and firmware notes synchronized.
+
+### 7) Connectors, test points, and board mating
+- Connector families and exact pin counts still need to be frozen before routing.
+- `JD1` must be corrected before layout because the symbol and footprint currently disagree.
+- Assign the chosen `Keystone 5015` footprint to the debug test points and keep the board-mating notes in `docs/PINMAP.md` up to date.
+
 ## Repo / footprint-library cleanup
 
 The schematic currently references external or non-portable footprint/library names such as:
@@ -74,3 +119,4 @@ Choose one of these approaches before layout gets deeper:
 
 ## Review log
 - 2026-04-06: initial schematic cleanup review captured in repo documentation.
+- 2026-04-07: follow-up review confirmed the repo copy had no newly saved KiCad files and added a block-by-block design review section.

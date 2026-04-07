@@ -16,6 +16,7 @@ The format follows a simple **Keep a Changelog** style.
 - `docs/PINMAP.md` for signal naming, connector grouping, and board-mating notes
 - a small SMT test-point recommendation added to BOM and PCB planning notes
 - `docs/SCHEMATIC_REVIEW.md` added to track cleanup items before PCB routing
+- follow-up schematic review status and block-by-block design notes documented
 
 ### Changed
 - Main firmware target aligned to ESP-IDF for the current supported ESP32-C6 board definition

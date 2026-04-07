@@ -45,4 +45,5 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 - should the repo track a formal decision log later?
 
 ## Notes log
+- 2026-04-07: follow-up schematic review used the current saved repo copy; if new KiCad edits are made, save/export before the next review pass.
 - 2026-04-06: initial parking-lot document added for repo housekeeping and iteration tracking.
