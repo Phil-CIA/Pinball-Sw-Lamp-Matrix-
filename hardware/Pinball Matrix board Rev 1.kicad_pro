@@ -37,9 +37,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.8,
-          "height": 1.27,
-          "width": 2.54
+          "drill": 0.0,
+          "height": 0.6,
+          "width": 0.5
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -871,6 +871,120 @@
           "group_by": false,
           "label": "#",
           "name": "${ITEM_NUMBER}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Circuits",
+          "name": "Circuits",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Contact Discharge Vesd",
+          "name": "Contact Discharge Vesd",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Maximum Clamping Voltage",
+          "name": "Maximum Clamping Voltage",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Peak Pulse Current (Ipp)@10/1000us",
+          "name": "Peak Pulse Current (Ipp)@10/1000us",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Reverse Leakage Current",
+          "name": "Reverse Leakage Current",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Peak Pulse Current(Ipp)@8/20us",
+          "name": "Peak Pulse Current(Ipp)@8/20us",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Reverse Stand-Off Voltage (Vrwm)",
+          "name": "Reverse Stand-Off Voltage (Vrwm)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "polarity",
+          "name": "polarity",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Peak Pulse Power Dissipation (Ppp)@10/1000us",
+          "name": "Peak Pulse Power Dissipation (Ppp)@10/1000us",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Peak Pulse Power(Ppp)@8/20us",
+          "name": "Peak Pulse Power(Ppp)@8/20us",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Polarity",
+          "name": "Polarity",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Breakdown Voltage",
+          "name": "Breakdown Voltage",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Breakdown Voltage (VBR)",
+          "name": "Breakdown Voltage (VBR)",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Clamping Voltage@Ipp",
+          "name": "Clamping Voltage@Ipp",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Emitted Color",
+          "name": "Emitted Color",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Impedance @ Frequency",
+          "name": "Impedance @ Frequency",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Number of Lines",
+          "name": "Number of Lines",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Current Rating",
+          "name": "Current Rating",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Junction Capacitance(Cj)@1MHz",
+          "name": "Junction Capacitance(Cj)@1MHz",
           "show": false
         }
       ],
