@@ -38,8 +38,8 @@
         "other_text_upright": false,
         "pads": {
           "drill": 0.0,
-          "height": 0.31,
-          "width": 1.54
+          "height": 1.78,
+          "width": 3.43
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -58,7 +58,12 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        [
+          "starved_thermal|176040000|72850000|c6306e27-b890-4189-9a8c-7bea071b82a4|c1353564-40b4-476d-a90f-08f04bb1dc6d|F.Cu",
+          ""
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -188,7 +193,7 @@
       ],
       "track_widths": [
         0.0,
-        1.0,
+        0.8,
         1.5,
         2.0
       ],
@@ -471,7 +476,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "Pinball Matrix board Rev 1.kicad_pro",
+    "filename": "Pinball Matrix board Rev 1_routed power.kicad_pro",
     "version": 3
   },
   "net_settings": {
@@ -489,7 +494,7 @@
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "priority": 2147483647,
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.18,
+        "track_width": 0.3,
         "via_diameter": 0.6,
         "via_drill": 0.3,
         "wire_width": 6
