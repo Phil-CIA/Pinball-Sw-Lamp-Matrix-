@@ -24,8 +24,8 @@ This project is building a combined **8x4 lamp matrix driver** and **8x4 switch 
 
 ## Immediate next priorities
 1. Clear the high-priority items in `docs/SCHEMATIC_REVIEW.md`
-2. Freeze row/column naming and connector pin assignments
-3. Finish schematic review and footprint checks
+2. Use the pre-routing checklist to lock current, connector, and thermal decisions
+3. Freeze row/column naming and connector pin assignments
 4. Start the first routed PCB revision
 
 ## Open questions to lock down

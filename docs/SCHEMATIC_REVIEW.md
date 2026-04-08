@@ -120,6 +120,29 @@ Choose one of these approaches before layout gets deeper:
 - Keep test points on logic/control nets easy to probe
 - Do not assume all custom footprints will resolve on a fresh machine unless the repo includes them or the setup is documented
 
+## Pre-routing go / no-go checklist
+
+Before committing to the heavy PCB routing, confirm these items:
+
+- [ ] **Row current estimate is written down**
+  - worst-case active row current for the `555` lamp matrix is understood and accepted
+- [ ] **Connector current handling is acceptable**
+  - input and output connectors are confirmed for real machine wiring/current pulses
+- [ ] **Trace widths are chosen in mm**
+  - lamp supply and high-current row/column paths are planned around the agreed wider copper approach
+- [ ] **VNQ thermal plan is intentional**
+  - copper area, pad treatment, and short current paths are accounted for
+- [ ] **Power-entry return paths are short and wide**
+  - fuse, TVS, bulk caps, and ground return placement are kept tight
+- [ ] **Comparator reference area is kept quiet**
+  - threshold/reference nodes are not sharing thin noisy returns with lamp current
+- [ ] **Connector pin order is frozen before routing**
+  - avoid rework after the large current paths are already placed
+- [ ] **Any DNP/tuning parts are clearly marked**
+  - especially EMI/filtering options on lamp outputs
+
+If these are mostly true, the board is in a reasonable state to continue routing.
+
 ## Review log
 - 2026-04-06: initial schematic cleanup review captured in repo documentation.
 - 2026-04-07: follow-up review confirmed the repo copy had no newly saved KiCad files and added a block-by-block design review section.

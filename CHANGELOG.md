@@ -18,6 +18,7 @@ The format follows a simple **Keep a Changelog** style.
 - `docs/SCHEMATIC_REVIEW.md` added to track cleanup items before PCB routing
 - follow-up schematic review status and block-by-block design notes documented
 - updated source review confirmed the comparator/clamp block and larger rail-TVS direction are acceptable
+- a practical pre-routing go/no-go checklist was added to the schematic review notes
 
 ### Changed
 - Main firmware target aligned to ESP-IDF for the current supported ESP32-C6 board definition
