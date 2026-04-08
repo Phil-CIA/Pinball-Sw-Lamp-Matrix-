@@ -17,6 +17,7 @@ The format follows a simple **Keep a Changelog** style.
 - a small SMT test-point recommendation added to BOM and PCB planning notes
 - `docs/SCHEMATIC_REVIEW.md` added to track cleanup items before PCB routing
 - follow-up schematic review status and block-by-block design notes documented
+- updated source review confirmed the comparator/clamp block and larger rail-TVS direction are acceptable
 
 ### Changed
 - Main firmware target aligned to ESP-IDF for the current supported ESP32-C6 board definition

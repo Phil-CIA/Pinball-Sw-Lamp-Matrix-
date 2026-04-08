@@ -56,6 +56,7 @@ Scope reviewed:
 
 ### 1) Power entry and protection
 - Good signs: PTC fuses, TVS parts, and bulk/decoupling capacitors are present in the schematic.
+- Follow-up review on 2026-04-08: moving to physically larger **per-rail TVS parts** is acceptable and can improve layout/rework, as long as the standoff/clamp ratings still match each rail.
 - Before routing, confirm real footprints for `F1` / `F2`, verify the bulk-cap voltage margin on the lamp rail, and keep the TVS return path physically short and wide.
 - Keep the fuse upstream of the TVS in the final PCB layout.
 
@@ -71,8 +72,10 @@ Scope reviewed:
 
 ### 4) Switch input comparator block (`LMV393` + clamps)
 - The comparator-based switch readback approach is still reasonable for the design.
-- Lock the final `LMV393` package footprint, confirm threshold/resistor values, and verify clamp orientation and noise margin.
-- Keep the comparator outputs clearly referenced to the 3.3V logic side.
+- Follow-up review on 2026-04-08 against the updated source confirms `LMV393` comparators with `BAT54C,215` clamp diodes and the expected `Ref_Comp1` / `Ref_Comp2` reference network.
+- I do **not** see a stop-the-design issue here; the block concept looks fine for now.
+- Keep the comparator outputs clearly referenced to the 3.3V logic side, and only add hysteresis later if bench testing shows chatter or noise around the threshold.
+- No exposed-pad package is needed here; a standard SOIC-8 / TSSOP-8 style comparator package remains the practical choice.
 
 ### 5) Shift-register / logic-output block (`74HC595`)
 - This block still matches the firmware bring-up concept.
@@ -120,3 +123,4 @@ Choose one of these approaches before layout gets deeper:
 ## Review log
 - 2026-04-06: initial schematic cleanup review captured in repo documentation.
 - 2026-04-07: follow-up review confirmed the repo copy had no newly saved KiCad files and added a block-by-block design review section.
+- 2026-04-08: pulled the latest remote KiCad updates; confirmed the switch-input comparator block and larger rail-TVS direction are conceptually acceptable.
