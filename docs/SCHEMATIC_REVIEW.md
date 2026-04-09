@@ -20,6 +20,24 @@ Scope reviewed:
 
 ---
 
+## Current pre-order repo status (2026-04-09)
+- Latest repo state includes **production-oriented outputs** under `hardware/`, including:
+  - routed PCB snapshots
+  - BOM CSV
+  - gerbers / drill files
+  - zipped production package
+- Current source review shows several earlier concerns are now effectively addressed:
+  - `U3` now uses a dedicated `ESP32-C6-DevKit-Amazon` footprint entry
+  - test points are assigned to `KEYSTONE_5015`
+  - output connectors use `.156" / 3.96 mm` KK-396 style footprints
+  - power input plan uses JST XH connectors with shared `18V` and `GND` pins, and a separate lighter-current `5V` pair
+  - planned routing approach uses `0.3 mm` minimum signal traces and `2.0–2.5 mm` row-current traces with VNQ thermal-pad stitching
+- Based on the schematic/block review to date, **no show-stopper has been identified** for moving forward with Rev 1.
+- Remaining caution items before ordering are mostly execution checks:
+  - run KiCad ERC/DRC on the exact final file you intend to order
+  - confirm the authoritative PCB/gerber set among the saved routed snapshots
+  - sanity-check connector pin order and polarity one last time against the harness
+
 ## High-priority items before PCB routing
 
 | Priority | Item | Review note / action |
