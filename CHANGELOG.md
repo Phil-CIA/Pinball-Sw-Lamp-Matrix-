@@ -20,7 +20,9 @@ The format follows a simple **Keep a Changelog** style.
 - updated source review confirmed the comparator/clamp block and larger rail-TVS direction are acceptable
 - a practical pre-routing go/no-go checklist was added to the schematic review notes
 - current pre-order repo status was documented after production files and routed PCB outputs were added
+- `docs/BRINGUP_CHECKLIST.md` added for first-board arrival, assembly, and power-up testing
+- restart / wait-for-hardware notes captured from the review chat
 
 ### Changed
 - Main firmware target aligned to ESP-IDF for the current supported ESP32-C6 board definition
-- README clarified that the current PCB file is a placeholder
+- README, `docs/PROJECT_STATUS.md`, and `hardware/README.md` were updated to reflect the ordered Rev 1 state instead of the earlier placeholder / pre-layout phase

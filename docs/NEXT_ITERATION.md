@@ -13,38 +13,63 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 ---
 
 ## Current next-iteration focus
-- clear the high-priority schematic items in `docs/SCHEMATIC_REVIEW.md`
-- use the pre-routing go/no-go checklist before committing the heavy PCB traces
-- lock down connector pin naming and numbering
-- confirm the exact ESP32-C6 bring-up board/module
-- review lamp current expectations and fuse sizing
-- prepare for the first real PCB layout revision
-- standardize on a small SMT test-point footprint for logic/debug signals
+- wait for the Rev 1 PCB and parts delivery
+- keep the repo status and ordered-file references synchronized
+- prepare the bench bring-up setup, tools, and test harness
+- keep `docs/PINMAP.md` and bring-up notes ready for first-board debugging
+
+## Restart here when hardware arrives
+1. **Visual inspection**
+   - polarity/orientation check for diodes, TVS parts, connectors, and the ESP32 board
+   - inspect VNQ thermal pad soldering and stencil results
+   - check for bridges, tombstones, and damaged pads
+
+2. **Pre-power checks**
+   - continuity / resistance check on `18V`, `5V`, `3.3V`, and `GND`
+   - verify fuse and TVS placement against the schematic
+   - confirm connector polarity and harness pin 1 direction
+
+3. **First power-up**
+   - bring the board up with current limiting if possible
+   - verify `5V` and `3.3V` rails first
+   - then confirm the ESP32-C6 boots and the firmware still runs as expected
+
+4. **Functional validation**
+   - verify shift-register activity
+   - verify all four switch-column comparator outputs
+   - test one lamp row / one lamp column first
+   - then move to a full matrix scan
+
+5. **Capture findings**
+   - record any thermal, noise, connector, or routing surprises
+   - note anything that should roll into a likely Rev 2
 
 ## Parking lot
 - confirm whether the final firmware should stay ESP-IDF-only or also support Arduino later
-- decide if lamp column drivers need any extra protection or test points beyond the current plan
+- decide if any lamp column protection or snubber options should be stuffed by default after bench testing
 - keep `docs/PINMAP.md` updated as the source of truth for signal naming and board-mating notes
 
-## Assumptions to validate
+## Assumptions to validate on real hardware
 - `VNQ7E100AJTR` remains the preferred high-side row driver
-- `LMV393` input conditioning is still the right switch-scan approach
+- `LMV393` input conditioning is the right switch-scan approach without extra hysteresis
 - `74HC595` output expansion is sufficient for the first revision
 - the current power-entry protection plan matches the real machine environment
+- `1 oz` copper with `0.3 mm` minimum signal traces and `2.0–2.5 mm` row-current traces is adequate for Rev 1
 
-## Things that may need reconsideration
-- connector family and harness approach
-- row/column labeling convention
+## Things that may need reconsideration after bring-up
+- connector family / harness approach in long-term service
+- row / column labeling convention on the installed machine
 - default boot-safe behavior for lamp outputs
 - EMI tuning parts to stuff by default vs DNP
-- future firmware architecture once hardware bring-up is complete
+- firmware architecture once hardware validation is complete
 
 ## Open questions
-- what exact connector count and pinout should revision 1 use?
-- what lamp load/current should be treated as the normal design target?
-- which signals need permanent test points on the first PCB revision?
+- what real lamp current and connector heating are seen on the bench?
+- do any comparator thresholds or reference values need tweaking after real switch tests?
+- which DNP protection / tuning parts should become default-fit for Rev 2?
 - should the repo track a formal decision log later?
 
 ## Notes log
+- 2026-04-09: Rev 1 PCB, stencil, and parts were ordered. Expected flow is to pause active design work, wait for the hardware, and resume with a structured bring-up pass when the boards arrive.
 - 2026-04-07: follow-up schematic review used the current saved repo copy; if new KiCad edits are made, save/export before the next review pass.
 - 2026-04-06: initial parking-lot document added for repo housekeeping and iteration tracking.
