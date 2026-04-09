@@ -1,4 +1,4 @@
-28309652140199515
+28313203537857147
 1My_Parts_ Connectors
 AMPHENOL_SPI HDR
 
@@ -41,6 +41,13 @@ KEYSTONE_5015
 0
 1
 1
+1My_Parts_ Connectors
+Molex_KK-396_A-41791-0010_1x10_P3.96mm_Vertical
+Molex KK 396 Interconnect System, old/engineering part number: A-41791-0010 example for new part number: 26-60-4100, 10 Pins (https://www.molex.com/pdm_docs/sd/026604020_sd.pdf), generated with kicad-footprint-generator
+connector Molex KK-396 vertical
+0
+10
+10
 1My_Parts_ Connectors
 SAMTEC_FTSH-105-01-X-DV-K-X
 
@@ -202,6 +209,13 @@ Untitled_2
 0
 0
 0
+1My_Parts_ Passive
+poly fuse
+
+
+0
+2
+2
 Audio_Module
 Reverb_BTDR-1H
 Digital Reverberation Unit, http://www.belton.co.kr/inc/downfile.php?seq=17&file=pdf (footprint from http://www.uk-electronic.de/PDF/BTDR-1.pdf)
