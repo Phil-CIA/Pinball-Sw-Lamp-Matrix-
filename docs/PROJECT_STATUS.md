@@ -3,12 +3,13 @@
 ## Summary
 This project is building a combined **8x4 lamp matrix driver** and **8x4 switch matrix scanner** board for a home-edition pinball machine.
 
-## Current state (2026-04-09)
+## Current state (2026-04-27)
 ### Hardware
 - Rev 1 schematic, PCB snapshots, Gerbers, drill files, BOM, and production ZIP are checked in under `hardware/`
 - PCB, stencil, and parts were ordered on **2026-04-09**
-- The project is now in a **wait-for-hardware / bring-up-prep** phase rather than active rerouting
-- Because several PCB snapshots exist, the ordered Rev 1 package should be treated as the frozen reference point until bring-up starts
+- Board was assembled and **5V and 3.3V rails confirmed up** on **2026-04-27**
+- Current phase: **active bring-up** — logic validation and staged lamp testing
+- Because several PCB snapshots exist, the ordered Rev 1 package should be treated as the frozen reference point for this bring-up session
 
 ### Rev 1 assumptions locked during review
 - `T10/555` incandescent lamps at `6.3V`
@@ -32,10 +33,11 @@ This project is building a combined **8x4 lamp matrix driver** and **8x4 switch 
 - Pin and connector mapping remains in `docs/PINMAP.md`
 
 ## Immediate next priorities
-1. Keep the ordered Rev 1 package and notes as the reference point
-2. Prepare the bench bring-up setup, tools, and test harness
-3. When boards arrive: inspect, short-check rails, power up safely, and validate logic before full lamp loading
-4. Record findings for a likely Rev 2 cleanup pass
+1. Flash and confirm ESP32-C6 bring-up firmware boots without reset loop
+2. Probe `SR_SCLK`, `SR_LATCH`, `SR_DATA0` and confirm shift-register activity
+3. Read all four `SW_COL_0..SW_COL_3` inputs and compare with expected states
+4. Test one lamp row + one lamp column before running a full matrix scan
+5. Record rail values, current draw, thermal notes, and any mapping surprises
 
 ## Open questions for bring-up / Rev 2
 - actual measured lamp current and connector heating on real hardware

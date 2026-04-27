@@ -4,27 +4,28 @@ Use this note when the first ordered boards arrive.
 
 ## Current status
 - Rev 1 PCB, stencil, and parts were ordered on **2026-04-09**.
-- Current project phase is **wait for hardware, then validate on bench**.
+- Board was **assembled** and **5V + 3.3V rails confirmed up** on **2026-04-27**.
+- Current project phase is **active bring-up** — logic validation and staged lamp testing.
 - Goal for Rev 1 is **fast validation**, not perfection.
 
 ---
 
 ## 1) Assembly / visual inspection
-- [ ] Check orientation of diodes, TVS parts, polarized caps, connectors, and the ESP32 board/module
-- [ ] Inspect `VNQ7E100AJTR` thermal pad soldering and general stencil results
-- [ ] Look for solder bridges, tombstones, lifted pads, or missing passives
-- [ ] Verify connector labels and pin 1 direction before attaching harnesses
+- [x] Check orientation of diodes, TVS parts, polarized caps, connectors, and the ESP32 board/module
+- [x] Inspect `VNQ7E100AJTR` thermal pad soldering and general stencil results
+- [x] Look for solder bridges, tombstones, lifted pads, or missing passives
+- [x] Verify connector labels and pin 1 direction before attaching harnesses
 
 ## 2) Pre-power continuity checks
-- [ ] Check resistance / continuity between `18V` and `GND`
-- [ ] Check resistance / continuity between `5V` and `GND`
-- [ ] Check resistance / continuity between `3.3V` and `GND`
-- [ ] Confirm fuse / TVS placement matches the schematic
+- [x] Check resistance / continuity between `18V` and `GND`
+- [x] Check resistance / continuity between `5V` and `GND`
+- [x] Check resistance / continuity between `3.3V` and `GND`
+- [x] Confirm fuse / TVS placement matches the schematic
 
 ## 3) First power-up
-- [ ] Use current limiting if possible
-- [ ] Bring up the supply and verify `5V` rail first
-- [ ] Verify `3.3V` regulator / logic rail is correct
+- [x] Use current limiting if possible
+- [x] Bring up the supply and verify `5V` rail first ✓ **5V confirmed 2026-04-27**
+- [x] Verify `3.3V` regulator / logic rail is correct ✓ **3.3V confirmed 2026-04-27**
 - [ ] Confirm the ESP32-C6 boots and the bring-up firmware still runs
 - [ ] Verify no unexpected heating on regulators, VNQs, or protection parts
 

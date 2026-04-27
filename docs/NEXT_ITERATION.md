@@ -13,9 +13,8 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 ---
 
 ## Current next-iteration focus
-- wait for the Rev 1 PCB and parts delivery
-- keep the repo status and ordered-file references synchronized
-- prepare the bench bring-up setup, tools, and test harness
+- ✅ 5V and 3.3V rails confirmed up on assembled Rev 1 board (2026-04-27)
+- Active phase: firmware flash → logic validation → staged lamp testing
 - keep `docs/PINMAP.md` and bring-up notes ready for first-board debugging
 
 ## Restart here when hardware arrives
@@ -70,6 +69,8 @@ Use it to avoid losing useful thoughts while keeping the current work focused.
 - should the repo track a formal decision log later?
 
 ## Notes log
+- 2026-04-27: **5V and 3.3V rails confirmed up on assembled Rev 1 board.** Active bring-up phase started.
+- 2026-04-27: **Rev 2 note:** 0805 component pads benefit from ~1.5 mm trace width at the pad; update design rules for Rev 2.
 - 2026-04-09: Rev 1 PCB, stencil, and parts were ordered. Expected flow is to pause active design work, wait for the hardware, and resume with a structured bring-up pass when the boards arrive.
 - 2026-04-07: follow-up schematic review used the current saved repo copy; if new KiCad edits are made, save/export before the next review pass.
 - 2026-04-06: initial parking-lot document added for repo housekeeping and iteration tracking.
