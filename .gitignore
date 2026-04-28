@@ -29,10 +29,12 @@ firmware/build.log
 *.bak
 *.bck
 *.tmp
+*.lck
 *.kicad_sch-bak
 *.kicad_pcb-bak
 _autosave-*
 *-autosave.kicad_sch
+*-backups/
 fp-info-cache
 
 # KiCad 3D cache (if used)
