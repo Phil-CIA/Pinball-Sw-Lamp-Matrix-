@@ -44,3 +44,11 @@ fp-info-cache
 # Uncomment if you prefer not to track generated outputs
 # hardware/exports/gerbers/
 # hardware/exports/bom/
+
+# ---- Local bring-up captures ----
+firmware/monitor_capture.log
+firmware/monitor_capture.err
+firmware/serial_capture_tmp.log
+firmware/serial_com4_12s.log
+firmware/pio_build_out.log
+firmware/pio_build_err.log
