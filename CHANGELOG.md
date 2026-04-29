@@ -12,6 +12,11 @@ The format follows a simple **Keep a Changelog** style.
 - Low-duty attract-style lamp chase sequence for matrix brightness/mapping validation
 - Dedicated `RuntimeMode::SwitchScan` firmware path with row-driven scan and per-row switch hit counters
 - Switch edge-rate telemetry (`SW_EDGE/s`) and control-link telemetry (`CTRL_I2C edges/s`) included in heartbeat output
+- `RuntimeMode::I2cSlaveRegmap` path for matrix control-link integration at I2C address `0x24`
+- Register-backed slave handling for lamp rows (`0x00..0x07`), switch bytes (`0x40..0x43`), and diagnostics (`0xF0..0xF3`)
+- OLED rendering retained in slave mode via software I2C on `GPIO7/GPIO6`
+- On-device OLED layout with status banner, 8x5 matrix grid, and right-pane telemetry (sweep/trace)
+- Link-state display and detection states: `WAIT`, `LIVE`, and `DEGRADED` (TX-stall aware)
 
 ### Changed
 - `docs/PROJECT_STATUS.md` updated: 5V and 3.3V rails confirmed up; phase is now active bring-up
@@ -21,3 +26,5 @@ The format follows a simple **Keep a Changelog** style.
 - `firmware/src/main.cpp` now defaults to safe idle with outputs off and requires explicit operator command before lamp-path testing
 - `firmware/src/main.cpp` now supports mode-selectable bring-up runtime with `SwitchScan` default for switch validation focus
 - `firmware/README.md` updated with current validated pin map, runtime modes, and no-space build-path guidance
+- `firmware/src/main.cpp` now defaults to `RuntimeMode::I2cSlaveRegmap` for control-board integration bring-up
+- I2C telemetry counters split into `badWrites` vs `ignoredWrites` for clearer protocol diagnostics

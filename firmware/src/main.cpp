@@ -3,9 +3,11 @@
 #include <cstring>
 
 #include "driver/gpio.h"
+#include "driver/i2c.h"
 #include "driver/i2c_master.h"
 #include "esp_err.h"
 #include "esp_check.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,6 +36,9 @@ static constexpr uint32_t SWITCH_SCAN_ROW_MS = 5;
 static constexpr uint32_t DISPLAY_FRAME_MS = 50;
 static constexpr uint32_t DISPLAY_HOLD_MS = 1000;
 static constexpr uint32_t DISPLAY_SCROLL_REV_MS = 5000;
+static constexpr uint32_t LINK_STALL_MS = 500;
+static constexpr uint32_t TRACE_MODE_PERIOD_MS = 4000;
+static constexpr uint8_t MAX_TRACE_ACTIVITY = 46;
 static constexpr uint8_t SR_ROW_COUNT = 8;
 static constexpr uint8_t SR_COL_COUNT = 4;
 static constexpr bool SR_OUTPUT_ACTIVE_LOW = false;
@@ -46,9 +51,316 @@ enum class RuntimeMode : uint8_t
 {
   LampAttract = 0,
   SwitchScan = 1,
+  I2cSlaveRegmap = 2,
 };
 
-static constexpr RuntimeMode kRuntimeMode = RuntimeMode::SwitchScan;
+static constexpr RuntimeMode kRuntimeMode = RuntimeMode::I2cSlaveRegmap;
+
+static constexpr uint8_t CAPTAIN_MATRIX_I2C_ADDRESS = 0x24;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_LAMP_BASE = 0x00;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_LAMP_END = 0x07;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_SWITCH_BASE = 0x40;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_SWITCH_END = 0x43;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_DIAG_BASE = 0xF0;
+static constexpr uint8_t CAPTAIN_MATRIX_REG_DIAG_END = 0xF3;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_SYSTEM_SETUP = 0x20;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_SYSTEM_ENABLE = 0x01;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_OUTPUT_SETUP = 0x80;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_OUTPUT_ENABLE = 0x01;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_PULSE_WIDTH_BASE = 0xE0;
+static constexpr uint8_t CAPTAIN_MATRIX_CMD_PULSE_WIDTH_MASK = 0x0F;
+static constexpr uint8_t CAPTAIN_MATRIX_DEFAULT_PULSE_WIDTH_LEVEL = 4;
+static constexpr uint8_t CAPTAIN_MATRIX_DIAG_FLAG_SYSTEM_ENABLED = 0x01;
+static constexpr uint8_t CAPTAIN_MATRIX_DIAG_FLAG_OUTPUT_ENABLED = 0x02;
+static constexpr size_t CAPTAIN_SWITCH_BYTES = 4;
+static constexpr size_t CAPTAIN_LAMP_BYTES = 8;
+static constexpr uint8_t CAPTAIN_LAMP_COLS = 5;
+static constexpr i2c_port_t CAPTAIN_SLAVE_PORT = I2C_NUM_0;
+static constexpr int CAPTAIN_SLAVE_RX_BUF = 128;
+static constexpr int CAPTAIN_SLAVE_TX_BUF = 128;
+static constexpr int OLED_SW_I2C_DELAY_US = 4;
+
+struct MatrixSlaveRuntime
+{
+  uint8_t lampRows[CAPTAIN_LAMP_BYTES];
+  uint8_t switchBytes[CAPTAIN_SWITCH_BYTES];
+  uint8_t readPointer;
+  uint8_t pulseWidthLevel;
+  bool systemEnabled;
+  bool outputEnabled;
+  bool linkSeen;
+  uint32_t rxPackets;
+  uint32_t txWindows;
+  uint32_t badWrites;
+  uint32_t ignoredWrites;
+};
+
+static MatrixSlaveRuntime s_matrixSlave = {
+    {},
+    {},
+    CAPTAIN_MATRIX_REG_SWITCH_BASE,
+    CAPTAIN_MATRIX_DEFAULT_PULSE_WIDTH_LEVEL,
+    false,
+    false,
+    false,
+    0,
+    0,
+    0,
+    0};
+
+static bool is_lamp_register(uint8_t reg)
+{
+  return (reg >= CAPTAIN_MATRIX_REG_LAMP_BASE) && (reg <= CAPTAIN_MATRIX_REG_LAMP_END);
+}
+
+static bool is_switch_register(uint8_t reg)
+{
+  return (reg >= CAPTAIN_MATRIX_REG_SWITCH_BASE) && (reg <= CAPTAIN_MATRIX_REG_SWITCH_END);
+}
+
+static bool is_diag_register(uint8_t reg)
+{
+  return (reg >= CAPTAIN_MATRIX_REG_DIAG_BASE) && (reg <= CAPTAIN_MATRIX_REG_DIAG_END);
+}
+
+enum class LinkState : uint8_t
+{
+  Wait = 0,
+  Live = 1,
+  Degraded = 2,
+};
+
+static LinkState current_link_state(bool linkDegraded)
+{
+  if (s_matrixSlave.rxPackets == 0)
+  {
+    return LinkState::Wait;
+  }
+  if (linkDegraded)
+  {
+    return LinkState::Degraded;
+  }
+  return LinkState::Live;
+}
+
+static const char* link_state_name(LinkState state)
+{
+  switch (state)
+  {
+    case LinkState::Wait:
+      return "WAIT";
+    case LinkState::Degraded:
+      return "DEGRADED";
+    case LinkState::Live:
+    default:
+      return "LIVE";
+  }
+}
+
+static uint8_t matrix_diag_value(uint8_t reg)
+{
+  switch (reg)
+  {
+    case 0xF0:
+    {
+      uint8_t flags = 0;
+      if (s_matrixSlave.systemEnabled)
+      {
+        flags |= CAPTAIN_MATRIX_DIAG_FLAG_SYSTEM_ENABLED;
+      }
+      if (s_matrixSlave.outputEnabled)
+      {
+        flags |= CAPTAIN_MATRIX_DIAG_FLAG_OUTPUT_ENABLED;
+      }
+      return flags;
+    }
+    case 0xF1:
+      return static_cast<uint8_t>(s_matrixSlave.pulseWidthLevel & CAPTAIN_MATRIX_CMD_PULSE_WIDTH_MASK);
+    case 0xF2:
+      return static_cast<uint8_t>(s_matrixSlave.rxPackets & 0xFFU);
+    case 0xF3:
+      return static_cast<uint8_t>(s_matrixSlave.txWindows & 0xFFU);
+    default:
+      return 0;
+  }
+}
+
+static void matrix_prepare_tx_window(uint8_t startReg)
+{
+  uint8_t txBuf[CAPTAIN_LAMP_BYTES] = {};
+  size_t txLen = 1;
+  if (is_switch_register(startReg))
+  {
+    const uint8_t offset = static_cast<uint8_t>(startReg - CAPTAIN_MATRIX_REG_SWITCH_BASE);
+    txLen = CAPTAIN_SWITCH_BYTES - offset;
+    for (size_t i = 0; i < txLen; ++i)
+    {
+      txBuf[i] = s_matrixSlave.switchBytes[offset + i];
+    }
+    s_matrixSlave.readPointer = CAPTAIN_MATRIX_REG_SWITCH_END;
+  }
+  else if (is_lamp_register(startReg))
+  {
+    const uint8_t offset = static_cast<uint8_t>(startReg - CAPTAIN_MATRIX_REG_LAMP_BASE);
+    txLen = CAPTAIN_LAMP_BYTES - offset;
+    for (size_t i = 0; i < txLen; ++i)
+    {
+      txBuf[i] = s_matrixSlave.lampRows[offset + i];
+    }
+    s_matrixSlave.readPointer = CAPTAIN_MATRIX_REG_LAMP_END;
+  }
+  else if (is_diag_register(startReg))
+  {
+    uint8_t diag[4] = {
+        matrix_diag_value(0xF0),
+        matrix_diag_value(0xF1),
+        matrix_diag_value(0xF2),
+        matrix_diag_value(0xF3)};
+    const uint8_t offset = static_cast<uint8_t>(startReg - CAPTAIN_MATRIX_REG_DIAG_BASE);
+    txLen = sizeof(diag) - offset;
+    for (size_t i = 0; i < txLen; ++i)
+    {
+      txBuf[i] = diag[offset + i];
+    }
+    s_matrixSlave.readPointer = CAPTAIN_MATRIX_REG_DIAG_END;
+  }
+  else
+  {
+    txBuf[0] = 0;
+    txLen = 1;
+  }
+
+  i2c_reset_tx_fifo(CAPTAIN_SLAVE_PORT);
+  const int queued = i2c_slave_write_buffer(CAPTAIN_SLAVE_PORT, txBuf, txLen, 0);
+  if (queued > 0)
+  {
+    s_matrixSlave.txWindows++;
+  }
+}
+
+static void matrix_handle_command(uint8_t command)
+{
+  if ((command & 0xF0U) == CAPTAIN_MATRIX_CMD_PULSE_WIDTH_BASE)
+  {
+    s_matrixSlave.pulseWidthLevel = static_cast<uint8_t>(command & CAPTAIN_MATRIX_CMD_PULSE_WIDTH_MASK);
+    return;
+  }
+
+  if ((command & 0xFEU) == CAPTAIN_MATRIX_CMD_SYSTEM_SETUP)
+  {
+    s_matrixSlave.systemEnabled = ((command & CAPTAIN_MATRIX_CMD_SYSTEM_ENABLE) != 0U);
+    return;
+  }
+
+  if ((command & 0xFEU) == CAPTAIN_MATRIX_CMD_OUTPUT_SETUP)
+  {
+    s_matrixSlave.outputEnabled = ((command & CAPTAIN_MATRIX_CMD_OUTPUT_ENABLE) != 0U);
+  }
+}
+
+static void matrix_handle_write_packet(const uint8_t* packet, size_t length)
+{
+  if ((packet == nullptr) || (length == 0))
+  {
+    return;
+  }
+
+  s_matrixSlave.linkSeen = true;
+  s_matrixSlave.rxPackets++;
+
+  const uint8_t first = packet[0];
+  if ((length == 1) && (((first & 0xFEU) == CAPTAIN_MATRIX_CMD_SYSTEM_SETUP) ||
+                        ((first & 0xFEU) == CAPTAIN_MATRIX_CMD_OUTPUT_SETUP) ||
+                        (first & 0xF0U) == CAPTAIN_MATRIX_CMD_PULSE_WIDTH_BASE))
+  {
+    matrix_handle_command(first);
+    matrix_prepare_tx_window(s_matrixSlave.readPointer);
+    return;
+  }
+
+  s_matrixSlave.readPointer = first;
+  if (length == 1)
+  {
+    matrix_prepare_tx_window(s_matrixSlave.readPointer);
+    return;
+  }
+
+  if (!is_lamp_register(first))
+  {
+    s_matrixSlave.ignoredWrites += static_cast<uint32_t>(length - 1U);
+    matrix_prepare_tx_window(s_matrixSlave.readPointer);
+    return;
+  }
+
+  for (size_t idx = 1; idx < length; ++idx)
+  {
+    const uint8_t reg = static_cast<uint8_t>(first + (idx - 1));
+    const uint8_t value = packet[idx];
+    if (is_lamp_register(reg))
+    {
+      s_matrixSlave.lampRows[reg - CAPTAIN_MATRIX_REG_LAMP_BASE] = static_cast<uint8_t>(value & 0x1FU);
+    }
+    else if (is_switch_register(reg) || is_diag_register(reg))
+    {
+      s_matrixSlave.ignoredWrites++;
+    }
+    else
+    {
+      s_matrixSlave.ignoredWrites++;
+    }
+  }
+
+  matrix_prepare_tx_window(s_matrixSlave.readPointer);
+}
+
+static void matrix_pack_switch_bytes(const bool swState[SR_ROW_COUNT][SR_COL_COUNT])
+{
+  for (uint8_t col = 0; col < SR_COL_COUNT; ++col)
+  {
+    uint8_t byteValue = 0;
+    for (uint8_t row = 0; row < SR_ROW_COUNT; ++row)
+    {
+      if (swState[row][col])
+      {
+        byteValue = static_cast<uint8_t>(byteValue | static_cast<uint8_t>(1U << row));
+      }
+    }
+    s_matrixSlave.switchBytes[col] = byteValue;
+  }
+}
+
+static void matrix_print_buffer_view(void)
+{
+  static bool hasPrev = false;
+  static uint8_t prevRows[CAPTAIN_LAMP_BYTES] = {};
+
+  std::printf("VIEW sys=%u out=%u pulse=%u reg=0x%02X rx=%lu tx=%lu badW=%lu ignW=%lu\n",
+              static_cast<unsigned>(s_matrixSlave.systemEnabled ? 1 : 0),
+              static_cast<unsigned>(s_matrixSlave.outputEnabled ? 1 : 0),
+              static_cast<unsigned>(s_matrixSlave.pulseWidthLevel),
+              static_cast<unsigned>(s_matrixSlave.readPointer),
+              static_cast<unsigned long>(s_matrixSlave.rxPackets),
+              static_cast<unsigned long>(s_matrixSlave.txWindows),
+              static_cast<unsigned long>(s_matrixSlave.badWrites),
+              static_cast<unsigned long>(s_matrixSlave.ignoredWrites));
+  std::printf("      C0 C1 C2 C3 C4   HEX  D\n");
+  for (uint8_t row = 0; row < CAPTAIN_LAMP_BYTES; ++row)
+  {
+    const uint8_t rowMask = s_matrixSlave.lampRows[row];
+    const bool changed = hasPrev && (rowMask != prevRows[row]);
+    std::printf("R%u |  %c  %c  %c  %c  %c   0x%02X  %c\n",
+                static_cast<unsigned>(row),
+                (rowMask & (1U << 0)) ? 'X' : '.',
+                (rowMask & (1U << 1)) ? 'X' : '.',
+                (rowMask & (1U << 2)) ? 'X' : '.',
+                (rowMask & (1U << 3)) ? 'X' : '.',
+                (rowMask & (1U << 4)) ? 'X' : '.',
+                static_cast<unsigned>(rowMask),
+                changed ? '!' : '.');
+    prevRows[row] = rowMask;
+  }
+  hasPrev = true;
+}
 
 struct LinkStats
 {
@@ -77,7 +389,182 @@ static constexpr LampPoint kAttractOrder[] = {
     {1, 3}, {2, 3}, {3, 3}, {0, 3},
     {6, 0}, {7, 3}};
 
+  static void fb_clear(void);
 static void fb_set_pixel(int x, int y, bool on);
+
+static inline void oled_sw_i2c_delay(void)
+{
+  esp_rom_delay_us(OLED_SW_I2C_DELAY_US);
+}
+
+static inline void oled_sw_sda(int level)
+{
+  gpio_set_level(PIN_OLED_I2C_SDA, level);
+}
+
+static inline void oled_sw_scl(int level)
+{
+  gpio_set_level(PIN_OLED_I2C_SCL, level);
+}
+
+static void oled_sw_i2c_start(void)
+{
+  oled_sw_sda(1);
+  oled_sw_scl(1);
+  oled_sw_i2c_delay();
+  oled_sw_sda(0);
+  oled_sw_i2c_delay();
+  oled_sw_scl(0);
+}
+
+static void oled_sw_i2c_stop(void)
+{
+  oled_sw_sda(0);
+  oled_sw_i2c_delay();
+  oled_sw_scl(1);
+  oled_sw_i2c_delay();
+  oled_sw_sda(1);
+  oled_sw_i2c_delay();
+}
+
+static bool oled_sw_i2c_write_byte(uint8_t value)
+{
+  for (int bit = 7; bit >= 0; --bit)
+  {
+    oled_sw_sda((value >> bit) & 0x01U);
+    oled_sw_i2c_delay();
+    oled_sw_scl(1);
+    oled_sw_i2c_delay();
+    oled_sw_scl(0);
+  }
+
+  oled_sw_sda(1);
+  oled_sw_i2c_delay();
+  oled_sw_scl(1);
+  oled_sw_i2c_delay();
+  const bool ack = (gpio_get_level(PIN_OLED_I2C_SDA) == 0);
+  oled_sw_scl(0);
+  return ack;
+}
+
+static esp_err_t ssd1306_sw_write(uint8_t control, const uint8_t* data, size_t len)
+{
+  oled_sw_i2c_start();
+  if (!oled_sw_i2c_write_byte(static_cast<uint8_t>(SSD1306_ADDR_A << 1)))
+  {
+    oled_sw_i2c_stop();
+    return ESP_FAIL;
+  }
+  if (!oled_sw_i2c_write_byte(control))
+  {
+    oled_sw_i2c_stop();
+    return ESP_FAIL;
+  }
+  for (size_t i = 0; i < len; ++i)
+  {
+    if (!oled_sw_i2c_write_byte(data[i]))
+    {
+      oled_sw_i2c_stop();
+      return ESP_FAIL;
+    }
+  }
+  oled_sw_i2c_stop();
+  return ESP_OK;
+}
+
+static esp_err_t ssd1306_sw_write_cmd(uint8_t cmd)
+{
+  return ssd1306_sw_write(0x00, &cmd, 1);
+}
+
+static esp_err_t ssd1306_sw_set_addr_window(void)
+{
+  esp_err_t err = ssd1306_sw_write_cmd(0x21);
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+  err = ssd1306_sw_write_cmd(0x00);
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+  err = ssd1306_sw_write_cmd(DISPLAY_W - 1);
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+
+  err = ssd1306_sw_write_cmd(0x22);
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+  err = ssd1306_sw_write_cmd(0x00);
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+  return ssd1306_sw_write_cmd((DISPLAY_H / 8) - 1);
+}
+
+static esp_err_t ssd1306_sw_flush(void)
+{
+  esp_err_t err = ssd1306_sw_set_addr_window();
+  if (err != ESP_OK)
+  {
+    return err;
+  }
+
+  for (int page = 0; page < (DISPLAY_H / 8); ++page)
+  {
+    const uint8_t* src = &s_framebuffer[page * DISPLAY_W];
+    err = ssd1306_sw_write(0x40, src, DISPLAY_W);
+    if (err != ESP_OK)
+    {
+      return err;
+    }
+  }
+
+  return ESP_OK;
+}
+
+static esp_err_t ssd1306_sw_init(void)
+{
+  gpio_config_t odCfg = {};
+  odCfg.pin_bit_mask = (1ULL << PIN_OLED_I2C_SDA) | (1ULL << PIN_OLED_I2C_SCL);
+  odCfg.mode = GPIO_MODE_OUTPUT_OD;
+  odCfg.pull_up_en = GPIO_PULLUP_ENABLE;
+  odCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+  odCfg.intr_type = GPIO_INTR_DISABLE;
+  const esp_err_t cfgErr = gpio_config(&odCfg);
+  if (cfgErr != ESP_OK)
+  {
+    return cfgErr;
+  }
+
+  oled_sw_sda(1);
+  oled_sw_scl(1);
+  esp_rom_delay_us(1000);
+
+  const uint8_t initSeq[] = {
+      0xAE, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40,
+      0x8D, 0x14, 0x20, 0x00, 0xA1, 0xC8, 0xDA, 0x12,
+      0x81, 0x8F, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6,
+      0x2E, 0xAF};
+
+  for (uint8_t cmd : initSeq)
+  {
+    const esp_err_t err = ssd1306_sw_write_cmd(cmd);
+    if (err != ESP_OK)
+    {
+      return err;
+    }
+  }
+
+  fb_clear();
+  return ssd1306_sw_flush();
+}
 
 static void sr_clk_pulse(void)
 {
@@ -338,6 +825,166 @@ static void fb_draw_text_5x7(int x, int y, const char* text)
   }
 }
 
+static void fb_draw_hline(int x0, int x1, int y)
+{
+  for (int x = x0; x <= x1; ++x)
+  {
+    fb_set_pixel(x, y, true);
+  }
+}
+
+static void fb_draw_vline(int x, int y0, int y1)
+{
+  for (int y = y0; y <= y1; ++y)
+  {
+    fb_set_pixel(x, y, true);
+  }
+}
+
+static void fb_draw_rect_outline(int x, int y, int w, int h)
+{
+  fb_draw_hline(x, x + w - 1, y);
+  fb_draw_hline(x, x + w - 1, y + h - 1);
+  fb_draw_vline(x, y, y + h - 1);
+  fb_draw_vline(x + w - 1, y, y + h - 1);
+}
+
+static void fb_fill_rect(int x, int y, int w, int h)
+{
+  for (int yy = y; yy < (y + h); ++yy)
+  {
+    for (int xx = x; xx < (x + w); ++xx)
+    {
+      fb_set_pixel(xx, yy, true);
+    }
+  }
+}
+
+static void fb_draw_matrix_oled_view(bool linkWaiting,
+                                     bool linkLive,
+                                     bool linkDegraded,
+                                     bool traceMode,
+                                     uint8_t activityLevel)
+{
+  static uint8_t prevRows[CAPTAIN_LAMP_BYTES] = {};
+  static bool hasPrev = false;
+  static uint8_t traceCols[50] = {};
+
+  fb_clear();
+
+  // Banner strip: two state boxes + pulse bar + heartbeat pixels.
+  fb_draw_rect_outline(0, 0, DISPLAY_W, 10);
+  fb_draw_rect_outline(2, 2, 10, 6);
+  fb_draw_rect_outline(14, 2, 10, 6);
+  if (s_matrixSlave.systemEnabled)
+  {
+    fb_fill_rect(3, 3, 8, 4);
+  }
+  if (s_matrixSlave.outputEnabled)
+  {
+    fb_fill_rect(15, 3, 8, 4);
+  }
+
+  fb_draw_rect_outline(28, 2, 40, 6);
+  const int pulseWidth = static_cast<int>((s_matrixSlave.pulseWidthLevel * 38U) / 15U);
+  if (pulseWidth > 0)
+  {
+    fb_fill_rect(29, 3, pulseWidth, 4);
+  }
+
+  // Link activity blinkers from rx/tx LSBs.
+  fb_set_pixel(74, 5, (s_matrixSlave.rxPackets & 0x01U) != 0U);
+  fb_set_pixel(78, 5, (s_matrixSlave.txWindows & 0x01U) != 0U);
+
+  // Link state labels as three boxes: WAIT / LIVE / DEG.
+  fb_draw_rect_outline(84, 2, 12, 6);
+  fb_draw_rect_outline(98, 2, 12, 6);
+  fb_draw_rect_outline(112, 2, 12, 6);
+  if (linkWaiting)
+  {
+    fb_fill_rect(85, 3, 10, 4);
+  }
+  if (linkLive)
+  {
+    fb_fill_rect(99, 3, 10, 4);
+  }
+  if (linkDegraded)
+  {
+    fb_fill_rect(113, 3, 10, 4);
+  }
+
+  // Keep rx/tx bars as secondary activity hints.
+  fb_draw_rect_outline(84, 10, 20, 6);
+  fb_draw_rect_outline(106, 10, 20, 6);
+  const int rxBar = static_cast<int>(s_matrixSlave.rxPackets & 0x0FU);
+  const int txBar = static_cast<int>(s_matrixSlave.txWindows & 0x0FU);
+  if (rxBar > 0)
+  {
+    fb_fill_rect(85, 11, rxBar, 4);
+  }
+  if (txBar > 0)
+  {
+    fb_fill_rect(107, 11, txBar, 4);
+  }
+
+  // 8x5 matrix grid from current lamp RAM.
+  const int gridX = 2;
+  const int gridY = 14;
+  const int cellW = 12;
+  const int cellH = 6;
+  for (uint8_t row = 0; row < CAPTAIN_LAMP_BYTES; ++row)
+  {
+    const uint8_t rowMask = s_matrixSlave.lampRows[row];
+    const bool rowChanged = hasPrev && (rowMask != prevRows[row]);
+    for (uint8_t col = 0; col < CAPTAIN_LAMP_COLS; ++col)
+    {
+      const int x = gridX + (col * cellW);
+      const int y = gridY + (row * cellH);
+      fb_draw_rect_outline(x, y, cellW - 1, cellH - 1);
+      if ((rowMask & (1U << col)) != 0U)
+      {
+        fb_fill_rect(x + 2, y + 2, cellW - 5, cellH - 3);
+      }
+    }
+    // Right-side per-row change marker.
+    if (rowChanged)
+    {
+      fb_fill_rect(66, gridY + (row * cellH) + 1, 3, cellH - 2);
+    }
+    prevRows[row] = rowMask;
+  }
+
+  const int paneX = 74;
+  const int paneY = 14;
+  const int paneW = 52;
+  const int paneH = 48;
+  fb_draw_rect_outline(paneX, paneY, paneW, paneH);
+  if (traceMode)
+  {
+    const int maxHeight = paneH - 2;
+    for (int i = 0; i < (paneW - 3); ++i)
+    {
+      traceCols[i] = traceCols[i + 1];
+    }
+    traceCols[paneW - 3] = (activityLevel > maxHeight) ? static_cast<uint8_t>(maxHeight) : activityLevel;
+    for (int x = 0; x < (paneW - 2); ++x)
+    {
+      const int h = traceCols[x];
+      for (int y = 0; y < h; ++y)
+      {
+        fb_set_pixel(paneX + 1 + x, paneY + paneH - 2 - y, true);
+      }
+    }
+  }
+  else
+  {
+    const int sweep = static_cast<int>(s_matrixSlave.txWindows % static_cast<uint32_t>(paneW - 2));
+    fb_draw_vline(paneX + 1 + sweep, paneY + 1, paneY + paneH - 2);
+  }
+
+  hasPrev = true;
+}
+
 static esp_err_t ssd1306_init(i2c_master_dev_handle_t dev)
 {
   const uint8_t initSeq[] = {
@@ -449,6 +1096,11 @@ extern "C" void app_main(void)
                 static_cast<unsigned long>(ATTRACT_ON_MS),
                 static_cast<unsigned>(sizeof(kAttractOrder) / sizeof(kAttractOrder[0])));
   }
+  else if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+  {
+    std::printf("Runtime mode: I2C_SLAVE_REGMAP addr=0x%02X SDA=GPIO2 SCL=GPIO3\n",
+                CAPTAIN_MATRIX_I2C_ADDRESS);
+  }
   else
   {
     std::printf("Runtime mode: SWITCH_SCAN row_step=%lums sw_active=%s\n",
@@ -456,7 +1108,7 @@ extern "C" void app_main(void)
                 SW_ACTIVE_LOW ? "LOW" : "HIGH");
   }
   std::printf("OLED I2C map: SDA=GPIO7 SCL=GPIO6 (try SSD1306 0x3C / 0x3D)\n");
-  std::printf("CTRL link monitor: SDA=GPIO2 SCL=GPIO3 (listen-only)\n");
+  std::printf("CTRL link pins: SDA=GPIO2 SCL=GPIO3\n");
 
   const uint64_t inputMask =
       (1ULL << PIN_SW_COL0) |
@@ -494,41 +1146,81 @@ extern "C" void app_main(void)
   gpio_set_level(PIN_SR_OE_N, 0);
   std::printf("SR OE_N level -> %d (0 means outputs enabled)\n", gpio_get_level(PIN_SR_OE_N));
 
-  gpio_config_t ctrlI2cCfg = {};
-  ctrlI2cCfg.pin_bit_mask = (1ULL << PIN_CTRL_I2C_SDA) | (1ULL << PIN_CTRL_I2C_SCL);
-  ctrlI2cCfg.mode = GPIO_MODE_INPUT;
-  ctrlI2cCfg.pull_up_en = GPIO_PULLUP_DISABLE;
-  ctrlI2cCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
-  ctrlI2cCfg.intr_type = GPIO_INTR_DISABLE;
-  const esp_err_t ctrlCfgErr = gpio_config(&ctrlI2cCfg);
-  std::printf("gpio_config(CTRL I2C monitor) -> %d\n", static_cast<int>(ctrlCfgErr));
+  esp_err_t ctrlCfgErr = ESP_OK;
+  if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
+  {
+    gpio_config_t ctrlI2cCfg = {};
+    ctrlI2cCfg.pin_bit_mask = (1ULL << PIN_CTRL_I2C_SDA) | (1ULL << PIN_CTRL_I2C_SCL);
+    ctrlI2cCfg.mode = GPIO_MODE_INPUT;
+    ctrlI2cCfg.pull_up_en = GPIO_PULLUP_DISABLE;
+    ctrlI2cCfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    ctrlI2cCfg.intr_type = GPIO_INTR_DISABLE;
+    ctrlCfgErr = gpio_config(&ctrlI2cCfg);
+    std::printf("gpio_config(CTRL I2C monitor) -> %d\n", static_cast<int>(ctrlCfgErr));
+  }
   int prevCtrlSda = gpio_get_level(PIN_CTRL_I2C_SDA);
   int prevCtrlScl = gpio_get_level(PIN_CTRL_I2C_SCL);
 
-  log_i2c_line_levels();
-
-  i2c_master_bus_config_t busCfg = {};
-  busCfg.i2c_port = I2C_NUM_0;
-  busCfg.sda_io_num = PIN_OLED_I2C_SDA;
-  busCfg.scl_io_num = PIN_OLED_I2C_SCL;
-  busCfg.clk_source = I2C_CLK_SRC_DEFAULT;
-  busCfg.glitch_ignore_cnt = 7;
-  busCfg.flags.enable_internal_pullup = true;
-
+  esp_err_t busErr = ESP_FAIL;
   i2c_master_bus_handle_t busHandle = nullptr;
-  const esp_err_t busErr = i2c_new_master_bus(&busCfg, &busHandle);
-  std::printf("i2c_new_master_bus -> %d (%s)\n",
-              static_cast<int>(busErr),
-              esp_err_to_name(busErr));
+  if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
+  {
+    log_i2c_line_levels();
+
+    i2c_master_bus_config_t busCfg = {};
+    busCfg.i2c_port = I2C_NUM_0;
+    busCfg.sda_io_num = PIN_OLED_I2C_SDA;
+    busCfg.scl_io_num = PIN_OLED_I2C_SCL;
+    busCfg.clk_source = I2C_CLK_SRC_DEFAULT;
+    busCfg.glitch_ignore_cnt = 7;
+    busCfg.flags.enable_internal_pullup = true;
+
+    busErr = i2c_new_master_bus(&busCfg, &busHandle);
+    std::printf("i2c_new_master_bus -> %d (%s)\n",
+                static_cast<int>(busErr),
+                esp_err_to_name(busErr));
+  }
+
+  if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+  {
+    i2c_config_t slaveCfg = {};
+    slaveCfg.mode = I2C_MODE_SLAVE;
+    slaveCfg.sda_io_num = PIN_CTRL_I2C_SDA;
+    slaveCfg.sda_pullup_en = GPIO_PULLUP_ENABLE;
+    slaveCfg.scl_io_num = PIN_CTRL_I2C_SCL;
+    slaveCfg.scl_pullup_en = GPIO_PULLUP_ENABLE;
+    slaveCfg.slave.addr_10bit_en = 0;
+    slaveCfg.slave.slave_addr = CAPTAIN_MATRIX_I2C_ADDRESS;
+
+    const esp_err_t paramErr = i2c_param_config(CAPTAIN_SLAVE_PORT, &slaveCfg);
+    std::printf("i2c_param_config(slave) -> %d (%s)\n",
+                static_cast<int>(paramErr),
+                esp_err_to_name(paramErr));
+    const esp_err_t installErr = (paramErr == ESP_OK)
+                                     ? i2c_driver_install(CAPTAIN_SLAVE_PORT,
+                                                          I2C_MODE_SLAVE,
+                                                          CAPTAIN_SLAVE_RX_BUF,
+                                                          CAPTAIN_SLAVE_TX_BUF,
+                                                          0)
+                                     : paramErr;
+    std::printf("i2c_driver_install(slave) -> %d (%s)\n",
+                static_cast<int>(installErr),
+                esp_err_to_name(installErr));
+    if (installErr == ESP_OK)
+    {
+      matrix_prepare_tx_window(s_matrixSlave.readPointer);
+    }
+  }
 
   i2c_master_dev_handle_t oledHandle = nullptr;
   uint8_t oledAddrInUse = 0;
   esp_err_t oledInitErr = ESP_FAIL;
+  bool oledSwReady = false;
   static constexpr char kScrollMsg[] = "Matrix boad rev 1";
   const int msgPixelWidth = (static_cast<int>(sizeof(kScrollMsg)) - 1) * 6;
   int lastStartX = 0;
   esp_err_t lastFlushErr = ESP_OK;
-  if (busErr == ESP_OK)
+  if ((kRuntimeMode != RuntimeMode::I2cSlaveRegmap) && (busErr == ESP_OK))
   {
     uint8_t firstI2cAddr = 0;
     const bool foundAny = scan_i2c_bus(busHandle, &firstI2cAddr);
@@ -557,6 +1249,14 @@ extern "C" void app_main(void)
       }
     }
   }
+  else if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+  {
+    oledInitErr = ssd1306_sw_init();
+    oledSwReady = (oledInitErr == ESP_OK);
+    std::printf("ssd1306_sw_init(GPIO7/6 @0x3C) -> %d (%s)\n",
+                static_cast<int>(oledInitErr),
+                esp_err_to_name(oledInitErr));
+  }
 
   uint32_t beat = 0;
   uint8_t activeRow = kAttractOrder[0].row;
@@ -573,6 +1273,7 @@ extern "C" void app_main(void)
   uint32_t sw2Edges = 0;
   uint32_t sw3Edges = 0;
   uint32_t swHits[SR_ROW_COUNT][SR_COL_COUNT] = {};
+  bool swState[SR_ROW_COUNT][SR_COL_COUNT] = {};
   LinkStats lastLinkStats = {0, 0, false};
   int prevSw0 = gpio_get_level(PIN_SW_COL0);
   int prevSw1 = gpio_get_level(PIN_SW_COL1);
@@ -583,22 +1284,31 @@ extern "C" void app_main(void)
   uint64_t lastHeartbeatMs = 0;
   uint64_t lastDisplayMs = 0;
   uint64_t lastSwitchScanRowMs = 0;
+  uint64_t txStallStartMs = 0;
+  uint32_t prevRxPackets = s_matrixSlave.rxPackets;
+  uint32_t prevTxWindows = s_matrixSlave.txWindows;
+  uint32_t lastDisplayRx = s_matrixSlave.rxPackets;
+  uint32_t lastDisplayTx = s_matrixSlave.txWindows;
+  bool linkDegraded = false;
 
   while (true)
   {
     const uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time() / 1000);
 
-    const int ctrlSda = gpio_get_level(PIN_CTRL_I2C_SDA);
-    const int ctrlScl = gpio_get_level(PIN_CTRL_I2C_SCL);
-    if (ctrlSda != prevCtrlSda)
+    if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
     {
-      ++ctrlSdaEdges;
-      prevCtrlSda = ctrlSda;
-    }
-    if (ctrlScl != prevCtrlScl)
-    {
-      ++ctrlSclEdges;
-      prevCtrlScl = ctrlScl;
+      const int ctrlSda = gpio_get_level(PIN_CTRL_I2C_SDA);
+      const int ctrlScl = gpio_get_level(PIN_CTRL_I2C_SCL);
+      if (ctrlSda != prevCtrlSda)
+      {
+        ++ctrlSdaEdges;
+        prevCtrlSda = ctrlSda;
+      }
+      if (ctrlScl != prevCtrlScl)
+      {
+        ++ctrlSclEdges;
+        prevCtrlScl = ctrlScl;
+      }
     }
 
     bool rowSampleTick = false;
@@ -669,10 +1379,55 @@ extern "C" void app_main(void)
       const bool swActive1 = SW_ACTIVE_LOW ? (sw1 == 0) : (sw1 != 0);
       const bool swActive2 = SW_ACTIVE_LOW ? (sw2 == 0) : (sw2 != 0);
       const bool swActive3 = SW_ACTIVE_LOW ? (sw3 == 0) : (sw3 != 0);
+      swState[activeRow][0] = swActive0;
+      swState[activeRow][1] = swActive1;
+      swState[activeRow][2] = swActive2;
+      swState[activeRow][3] = swActive3;
       if (swActive0) ++swHits[activeRow][0];
       if (swActive1) ++swHits[activeRow][1];
       if (swActive2) ++swHits[activeRow][2];
       if (swActive3) ++swHits[activeRow][3];
+      if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+      {
+        matrix_pack_switch_bytes(swState);
+      }
+    }
+
+    if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+    {
+      uint8_t rxPacket[32] = {};
+      const int bytesRead = i2c_slave_read_buffer(CAPTAIN_SLAVE_PORT, rxPacket, sizeof(rxPacket), 0);
+      if (bytesRead > 0)
+      {
+        matrix_handle_write_packet(rxPacket, static_cast<size_t>(bytesRead));
+      }
+
+      const uint32_t curRx = s_matrixSlave.rxPackets;
+      const uint32_t curTx = s_matrixSlave.txWindows;
+      const bool rxAdvanced = (curRx != prevRxPackets);
+      const bool txAdvanced = (curTx != prevTxWindows);
+      if (rxAdvanced && !txAdvanced)
+      {
+        if (txStallStartMs == 0)
+        {
+          txStallStartMs = nowMs;
+        }
+        else if ((nowMs - txStallStartMs) > LINK_STALL_MS)
+        {
+          linkDegraded = true;
+        }
+      }
+      if (txAdvanced)
+      {
+        txStallStartMs = 0;
+        linkDegraded = false;
+      }
+      if (curRx == 0)
+      {
+        linkDegraded = false;
+      }
+      prevRxPackets = curRx;
+      prevTxWindows = curTx;
     }
 
     if ((nowMs - lastHeartbeatMs) >= HEARTBEAT_MS)
@@ -717,16 +1472,41 @@ extern "C" void app_main(void)
       sw1Edges = 0;
       sw2Edges = 0;
       sw3Edges = 0;
-      const bool ctrlLinkActive = (ctrlSdaEdges > 0U) && (ctrlSclEdges > 0U);
-      lastLinkStats = {ctrlSdaEdges, ctrlSclEdges, ctrlLinkActive};
-      std::printf("       CTRL_I2C edges/s: SDA=%lu SCL=%lu link=%s\n",
-          static_cast<unsigned long>(ctrlSdaEdges),
-          static_cast<unsigned long>(ctrlSclEdges),
-          ctrlLinkActive ? "ACTIVE" : "IDLE");
-      ctrlSdaEdges = 0;
-      ctrlSclEdges = 0;
+      if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+      {
+        std::printf("       I2C_SLAVE reg=0x%02X sys=%u out=%u pulse=%u rx=%lu tx=%lu badW=%lu ignW=%lu sw=%02X %02X %02X %02X\n",
+                    static_cast<unsigned>(s_matrixSlave.readPointer),
+                    static_cast<unsigned>(s_matrixSlave.systemEnabled ? 1 : 0),
+                    static_cast<unsigned>(s_matrixSlave.outputEnabled ? 1 : 0),
+                    static_cast<unsigned>(s_matrixSlave.pulseWidthLevel),
+                    static_cast<unsigned long>(s_matrixSlave.rxPackets),
+                    static_cast<unsigned long>(s_matrixSlave.txWindows),
+              static_cast<unsigned long>(s_matrixSlave.badWrites),
+              static_cast<unsigned long>(s_matrixSlave.ignoredWrites),
+                    static_cast<unsigned>(s_matrixSlave.switchBytes[0]),
+                    static_cast<unsigned>(s_matrixSlave.switchBytes[1]),
+                    static_cast<unsigned>(s_matrixSlave.switchBytes[2]),
+                    static_cast<unsigned>(s_matrixSlave.switchBytes[3]));
+        const LinkState linkState = current_link_state(linkDegraded);
+        std::printf("       LINK state=%s\n", link_state_name(linkState));
+        if ((beat % 2U) == 0U)
+        {
+          matrix_print_buffer_view();
+        }
+      }
+      else
+      {
+        const bool ctrlLinkActive = (ctrlSdaEdges > 0U) && (ctrlSclEdges > 0U);
+        lastLinkStats = {ctrlSdaEdges, ctrlSclEdges, ctrlLinkActive};
+        std::printf("       CTRL_I2C edges/s: SDA=%lu SCL=%lu link=%s\n",
+            static_cast<unsigned long>(ctrlSdaEdges),
+            static_cast<unsigned long>(ctrlSclEdges),
+            ctrlLinkActive ? "ACTIVE" : "IDLE");
+        ctrlSdaEdges = 0;
+        ctrlSclEdges = 0;
+      }
 
-      if (oledInitErr == ESP_OK)
+      if ((kRuntimeMode != RuntimeMode::I2cSlaveRegmap) && (oledInitErr == ESP_OK))
       {
         std::printf("       OLED@0x%02X scroll x=%d err=%d (%s)\n",
                     oledAddrInUse,
@@ -734,7 +1514,7 @@ extern "C" void app_main(void)
                     static_cast<int>(lastFlushErr),
                     esp_err_to_name(lastFlushErr));
       }
-      else
+      else if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
       {
         std::printf("       OLED init failed: %d (%s)\n",
                     static_cast<int>(oledInitErr),
@@ -742,7 +1522,26 @@ extern "C" void app_main(void)
       }
     }
 
-    if (oledInitErr == ESP_OK)
+    if ((kRuntimeMode == RuntimeMode::I2cSlaveRegmap) && oledSwReady)
+    {
+      if ((nowMs - lastDisplayMs) >= DISPLAY_FRAME_MS)
+      {
+        lastDisplayMs = nowMs;
+        const LinkState linkState = current_link_state(linkDegraded);
+        const bool linkWaiting = (linkState == LinkState::Wait);
+        const bool linkLive = (linkState == LinkState::Live);
+        const bool traceMode = ((nowMs / TRACE_MODE_PERIOD_MS) & 0x1ULL) != 0ULL;
+        const uint32_t dispRx = s_matrixSlave.rxPackets;
+        const uint32_t dispTx = s_matrixSlave.txWindows;
+        const uint32_t delta = (dispRx - lastDisplayRx) + (dispTx - lastDisplayTx);
+        lastDisplayRx = dispRx;
+        lastDisplayTx = dispTx;
+        const uint8_t activityLevel = static_cast<uint8_t>((delta > MAX_TRACE_ACTIVITY) ? MAX_TRACE_ACTIVITY : delta);
+        fb_draw_matrix_oled_view(linkWaiting, linkLive, linkDegraded, traceMode, activityLevel);
+        lastFlushErr = ssd1306_sw_flush();
+      }
+    }
+    else if ((kRuntimeMode != RuntimeMode::I2cSlaveRegmap) && (oledInitErr == ESP_OK))
     {
       if ((nowMs - lastDisplayMs) >= DISPLAY_FRAME_MS)
       {
