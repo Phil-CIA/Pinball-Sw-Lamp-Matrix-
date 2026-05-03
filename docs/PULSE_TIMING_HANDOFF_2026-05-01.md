@@ -1,96 +1,126 @@
 # Pulse Timing Handoff - 2026-05-01
 
-Status: Ready for implementation and bench validation on next workstation.
-Scope: Matrix row pulse timing and sequence stabilization only.
+Status: Local implementation drafted on this workstation, not yet built or bench-validated.
+Scope: Matrix shift-register timing, lamp-first row sequencing, and follow-on switch sampling placement.
 
 ## Why this handoff exists
-Logic analyzer captures indicate row pulse behavior is not yet shaped as intended.
-Observed concern: row transitions appear stacked/overlapping and current firmware does not explicitly enforce blank/off and settle timing windows between row changes and sampling.
+The important point from today's review is that determinism has to come from the shift-register write itself.
+The time-critical primitive should do only this:
 
-## Current implementation snapshot (confirmed)
+1. Take the current row/column image.
+2. Apply the intended row/column value.
+3. Clock and latch the frame.
+
+No scan logic, no conditional behavior, and no readback work should live inside that primitive.
+That keeps row-to-row edge placement repeatable and makes the logic analyzer captures interpretable.
+
+## Current status on this workstation
 Primary source file: firmware/src/main.cpp
 
-- Runtime mode in current build: `RuntimeMode::SwitchScan`
-- Target row step constant: `SWITCH_SCAN_ROW_MS = 5`
-- Loop delay: `vTaskDelay(pdMS_TO_TICKS(10))`
-- Row advance: increments `activeRow` when row interval elapses
-- Frame drive: writes one-hot row frame immediately with `sr_shift_frame(...)`
-- Sampling: switch columns are read in same loop pass after frame shift
-- Missing explicit timing phases:
-  - no forced blank/off phase between rows
-  - no explicit settle delay before sampling
+Local edits have already been made in that file to move the non-attract scan path to an explicit scheduler with microsecond deadlines.
+The scheduler now uses these phases:
 
-This is likely the source of non-ideal waveform shape and overlap appearance on LA.
+1. Blank
+2. Drive
+3. Settle
+4. Sample
+5. Hold
 
-## Stabilization objective
-Introduce deterministic row timing phases so each row cycle is explicit and measurable:
+The current local implementation also separates row and column SR writes instead of relying on one combined row transition.
 
-1. Blank phase (all rows off)
-2. Drive phase (exactly one row on)
-3. Settle phase (allow hardware propagation/RC settle)
-4. Sample phase (read columns at a fixed point)
-5. Hold/advance phase (maintain total slot period target)
+Important limitation: this workstation shell does not have ESP-IDF initialized, so the change has not been built here. `idf.py` was not available on `PATH`, and editor diagnostics only reported missing ESP-IDF include paths.
 
-## Planned timing model (initial bench values)
-Start with constants, then tune from captures:
+## Lamp-first design decision
+The same base SR routine applies to both lamp drive and switch scanning, but the next bench target should be lamp timing first.
+Reason: if row and column transitions are electrically clean for lamps, the same scheduler structure gives a stable foundation for switch sampling afterward.
 
-- Row slot target: 5 ms
-- Blank window: 50 to 150 us
-- Settle window: 50 to 200 us
-- Sample point: fixed after settle
-- Dwell: remainder of slot to keep stable cadence
+The intended per-row write order is:
 
-Note: microsecond windows are starting points for bench tuning, not locked values.
+1. Blank write: all rows off, all columns off.
+2. Row-on write: target row active, columns still off.
+3. Column-on write: same row active, desired columns driven.
+4. Settle delay: allow external hardware to reach a stable state.
+5. Sample point: used for switches later, at a fixed delay from the final latch.
+6. Columns-off write: same row still selected, columns forced off.
+7. Dead-time: short off interval to cover driver/storage/RC recovery.
+8. Row-off write: force row inactive before the next row begins.
 
-## Implementation tasks
-1. Add grouped timing constants in firmware/src/main.cpp for blank/settle/sample timing.
-2. Refactor row scheduler to explicit phase/state machine.
-3. Enforce one-row-active invariant:
-   - all rows off during blank
-   - one row active during drive
-   - no direct row-to-row transition without blank
-4. Move switch sampling to a deterministic post-settle sample point.
-5. Add lightweight instrumentation:
-   - phase overrun/miss counters
-   - optional debug GPIO pulse at sample instant for LA alignment
-6. Keep existing bring-up visibility (OLED status, heartbeat diagnostics) intact.
+This ordering avoids both of the bad overlap cases:
 
-## Verification checklist (required)
-Use same LA channels/timebase for before/after comparisons.
+- new row with old columns
+- old row with new columns
 
-- [ ] No dual-row overlap during transitions
-- [ ] One-hot row behavior at all times
-- [ ] Sample instant consistently after settle window
-- [ ] Stable full scan period over >= 10 seconds
-- [ ] Switch detection remains correct under rapid actuation
-- [ ] No new false double-trigger artifacts
+## Timing model to bench-tune
+Current local constants in firmware/src/main.cpp:
 
-## Dependencies and non-goals
-Included now:
-- matrix row pulse timing/sequence stabilization
-- measurement-backed waveform validation
+- `SWITCH_SCAN_ROW_MS = 5`
+- `ROW_BLANK_US = 100`
+- `ROW_SETTLE_US = 100`
+- `ROW_OFF_DEADTIME_US = 50`
 
-Not included in this pass:
-- gameplay scoring logic
-- control-board solenoid mapping changes
-- audio parity migration
-- broader protocol expansion beyond current scope
+These are starting values only. The MCU is not the limiting factor; the external devices are. Budget must cover:
 
-## Related references
-In this repo:
-- firmware/src/main.cpp
-- docs/CONTROL_MATRIX_INTERFACE_V1.md
-- docs/SYSTEM_BEHAVIOR_CONTRACT_MATRIX_BOARD.md
+- shift-register propagation and latch behavior
+- row-driver turn-on and turn-off timing
+- column-line RC settling
+- any analog or GPIO recovery before a sample is trusted
 
-Cross-repo context (control board repo):
-- firmware/control-board/reference/legacy_control_main.cpp (deterministic pulse style reference)
-- firmware/control-board/include/solenoid_gpio_config.h (pulse-width constants)
+## What was changed locally
+In firmware/src/main.cpp, the local uncommitted edit does the following:
 
-## Immediate next action on other workstation
-1. Pull latest from main.
-2. Implement scheduler phase model in firmware/src/main.cpp.
-3. Capture LA before/after and record measured timing deltas.
-4. Update docs/PROJECT_STATUS.md with measured results once first clean non-overlap capture is confirmed.
+1. Adds a dedicated `RowPhase` enum and `RowScheduler` state.
+2. Adds `sr_write_image(rowByte, colByte)` so the SR write path stays simple and constant-time.
+3. Replaces the old coarse row-step logic with explicit microsecond phase deadlines.
+4. Splits non-attract row service into separate writes for row-only and row-plus-columns.
+5. Moves switch sampling to the fixed post-settle sample phase.
+6. Adds heartbeat visibility for scheduler phase and overrun count.
 
-Last updated: 2026-05-01
+This is the right direction, but it still needs a real build and bench capture before commit.
+
+## Outstanding files to carry and commit
+As of this handoff, the matrix repo has these outstanding modified files:
+
+- `firmware/src/main.cpp`
+- `docs/PULSE_TIMING_HANDOFF_2026-05-01.md`
+
+Control-board repo on this workstation showed no outstanding changes.
+
+## Required validation on the other workstation
+Use an ESP-IDF-enabled shell on the other workstation.
+
+1. Pull the latest matrix repo state from the remote.
+2. Bring over or reapply the local edits if they are not yet committed.
+3. Run `idf.py build` in the firmware directory.
+4. Capture LA traces on at least: row output, SR latch, SR clock, and one column input.
+5. Confirm this sequence electrically:
+   - blank frame
+   - row-on / columns-off frame
+   - row-on / columns-on frame
+   - settle interval
+   - sample instant
+   - columns-off frame
+   - row-off frame
+6. Tune `ROW_BLANK_US`, `ROW_SETTLE_US`, and `ROW_OFF_DEADTIME_US` until overlap is gone and timing is repeatable.
+
+## Commit target after validation
+If the build passes and the waveform looks correct, commit the two modified matrix files above as the timing-stabilization checkpoint.
+
+Suggested commit scope:
+
+- deterministic SR scheduler and explicit row/column timing sequence
+- updated handoff notes with lamp-first validation plan
+
+## Non-goals for this pass
+Do not widen this pass into gameplay or control integration yet.
+Still out of scope until the lamp timing is proven:
+
+- control-board solenoid coupling
+- scoring behavior
+- audio parity work
+- broader protocol feature work beyond what is needed to exercise lamp timing
+
+## Immediate next action on the other workstation
+Open an ESP-IDF shell, build the matrix firmware, bench the lamp waveform first, then commit the outstanding matrix files once the timing constants are validated.
+
+Last updated: 2026-05-03
 Owner for next step: bench firmware dev workstation

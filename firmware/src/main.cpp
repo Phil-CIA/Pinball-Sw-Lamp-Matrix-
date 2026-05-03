@@ -33,6 +33,10 @@ static constexpr uint32_t HEARTBEAT_MS = 1000;
 static constexpr uint32_t ATTRACT_SLOT_MS = 120;
 static constexpr uint32_t ATTRACT_ON_MS = 10;
 static constexpr uint32_t SWITCH_SCAN_ROW_MS = 5;
+static constexpr uint32_t SWITCH_SCAN_ROW_US = SWITCH_SCAN_ROW_MS * 1000U;
+static constexpr uint32_t ROW_BLANK_US = 100;
+static constexpr uint32_t ROW_SETTLE_US = 100;
+static constexpr uint32_t ROW_OFF_DEADTIME_US = 50;
 static constexpr uint32_t DISPLAY_FRAME_MS = 50;
 static constexpr uint32_t DISPLAY_HOLD_MS = 1000;
 static constexpr uint32_t DISPLAY_SCROLL_REV_MS = 5000;
@@ -52,6 +56,25 @@ enum class RuntimeMode : uint8_t
   LampAttract = 0,
   SwitchScan = 1,
   I2cSlaveRegmap = 2,
+};
+
+enum class RowPhase : uint8_t
+{
+  Blank = 0,
+  Drive = 1,
+  Settle = 2,
+  Sample = 3,
+  Hold = 4,
+};
+
+struct RowScheduler
+{
+  RowPhase phase;
+  uint8_t activeRow;
+  uint8_t nextRow;
+  uint64_t slotStartUs;
+  uint64_t phaseDeadlineUs;
+  uint32_t overruns;
 };
 
 static constexpr RuntimeMode kRuntimeMode = RuntimeMode::I2cSlaveRegmap;
@@ -600,6 +623,26 @@ static void sr_shift_frame(uint16_t frame)
     sr_clk_pulse();
   }
   sr_latch_pulse();
+}
+
+static uint16_t sr_write_image(uint8_t rowByte, uint8_t colByte)
+{
+  const uint16_t frame = sr_compose_frame(rowByte, colByte);
+  sr_shift_frame(frame);
+  return frame;
+}
+
+static uint8_t matrix_row_col_byte(uint8_t row)
+{
+  if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
+  {
+    return 0x00;
+  }
+  if (!s_matrixSlave.systemEnabled || !s_matrixSlave.outputEnabled)
+  {
+    return 0x00;
+  }
+  return static_cast<uint8_t>(s_matrixSlave.lampRows[row] & 0x1FU);
 }
 
 static void log_i2c_line_levels(void)
@@ -1261,11 +1304,10 @@ extern "C" void app_main(void)
   uint32_t beat = 0;
   uint8_t activeRow = kAttractOrder[0].row;
   uint8_t activeCol = kAttractOrder[0].col;
+  uint8_t activeColByte = static_cast<uint8_t>(1U << activeCol);
   uint8_t attractStep = 0;
   uint16_t activeFrame = sr_compose_frame(static_cast<uint8_t>(1U << activeRow),
-                                          static_cast<uint8_t>(1U << activeCol));
-  uint16_t offFrame = sr_compose_frame(0x00, 0x00);
-  bool lampPulseOn = false;
+                                          activeColByte);
   uint32_t ctrlSdaEdges = 0;
   uint32_t ctrlSclEdges = 0;
   uint32_t sw0Edges = 0;
@@ -1280,20 +1322,36 @@ extern "C" void app_main(void)
   int prevSw2 = gpio_get_level(PIN_SW_COL2);
   int prevSw3 = gpio_get_level(PIN_SW_COL3);
 
-  const uint64_t bootMs = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+  const uint64_t bootUs = static_cast<uint64_t>(esp_timer_get_time());
+  const uint64_t bootMs = bootUs / 1000U;
   uint64_t lastHeartbeatMs = 0;
   uint64_t lastDisplayMs = 0;
-  uint64_t lastSwitchScanRowMs = 0;
   uint64_t txStallStartMs = 0;
   uint32_t prevRxPackets = s_matrixSlave.rxPackets;
   uint32_t prevTxWindows = s_matrixSlave.txWindows;
   uint32_t lastDisplayRx = s_matrixSlave.rxPackets;
   uint32_t lastDisplayTx = s_matrixSlave.txWindows;
   bool linkDegraded = false;
+  RowScheduler rowScheduler = {
+      RowPhase::Blank,
+      0,
+      0,
+      bootUs,
+      bootUs + ROW_BLANK_US,
+      0};
+
+  if (kRuntimeMode != RuntimeMode::LampAttract)
+  {
+    activeRow = rowScheduler.activeRow;
+    activeCol = 0;
+    activeColByte = 0;
+    activeFrame = sr_write_image(0x00, 0x00);
+  }
 
   while (true)
   {
-    const uint64_t nowMs = static_cast<uint64_t>(esp_timer_get_time() / 1000);
+    const uint64_t nowUs = static_cast<uint64_t>(esp_timer_get_time());
+    const uint64_t nowMs = nowUs / 1000U;
 
     if (kRuntimeMode != RuntimeMode::I2cSlaveRegmap)
     {
@@ -1312,6 +1370,7 @@ extern "C" void app_main(void)
     }
 
     bool rowSampleTick = false;
+    uint8_t sampledRow = activeRow;
     if (kRuntimeMode == RuntimeMode::LampAttract)
     {
       const uint32_t stepCount = static_cast<uint32_t>(sizeof(kAttractOrder) / sizeof(kAttractOrder[0]));
@@ -1322,29 +1381,73 @@ extern "C" void app_main(void)
         attractStep = static_cast<uint8_t>(slotIndex);
         activeRow = kAttractOrder[attractStep].row;
         activeCol = kAttractOrder[attractStep].col;
+        activeColByte = static_cast<uint8_t>(1U << activeCol);
         const uint8_t rowByte = static_cast<uint8_t>(1U << activeRow);
-        const uint8_t colByte = static_cast<uint8_t>(1U << activeCol);
-        activeFrame = sr_compose_frame(rowByte, colByte);
+        activeFrame = sr_compose_frame(rowByte, activeColByte);
       }
 
-      lampPulseOn = (inSlotMs < ATTRACT_ON_MS);
-      sr_shift_frame(lampPulseOn ? activeFrame : offFrame);
+      const bool attractLampOn = (inSlotMs < ATTRACT_ON_MS);
+      activeFrame = sr_write_image(attractLampOn ? static_cast<uint8_t>(1U << activeRow) : 0x00,
+                   attractLampOn ? activeColByte : 0x00);
     }
     else
     {
-      if ((nowMs - lastSwitchScanRowMs) >= SWITCH_SCAN_ROW_MS)
+      while (nowUs >= rowScheduler.phaseDeadlineUs)
       {
-        lastSwitchScanRowMs = nowMs;
-        activeRow = static_cast<uint8_t>((activeRow + 1U) % SR_ROW_COUNT);
-        rowSampleTick = true;
+        switch (rowScheduler.phase)
+        {
+          case RowPhase::Blank:
+            rowScheduler.phase = RowPhase::Drive;
+            continue;
+          case RowPhase::Drive:
+          {
+            activeRow = rowScheduler.nextRow;
+            rowScheduler.activeRow = activeRow;
+            const uint8_t rowByte = static_cast<uint8_t>(1U << activeRow);
+            activeCol = 0;
+            activeColByte = 0x00;
+            activeFrame = sr_write_image(rowByte, 0x00);
+            activeColByte = matrix_row_col_byte(activeRow);
+            activeFrame = sr_write_image(rowByte, activeColByte);
+            rowScheduler.phase = RowPhase::Settle;
+            rowScheduler.phaseDeadlineUs = static_cast<uint64_t>(esp_timer_get_time()) + ROW_SETTLE_US;
+            break;
+          }
+          case RowPhase::Settle:
+            rowScheduler.phase = RowPhase::Sample;
+            continue;
+          case RowPhase::Sample:
+            sampledRow = rowScheduler.activeRow;
+            rowSampleTick = true;
+            rowScheduler.phase = RowPhase::Hold;
+            rowScheduler.phaseDeadlineUs = rowScheduler.slotStartUs + SWITCH_SCAN_ROW_US;
+            break;
+          case RowPhase::Hold:
+          {
+            const uint8_t rowByte = static_cast<uint8_t>(1U << rowScheduler.activeRow);
+            activeColByte = 0x00;
+            activeFrame = sr_write_image(rowByte, 0x00);
+            if (ROW_OFF_DEADTIME_US > 0U)
+            {
+              esp_rom_delay_us(ROW_OFF_DEADTIME_US);
+            }
+            activeFrame = sr_write_image(0x00, 0x00);
+            rowScheduler.slotStartUs += SWITCH_SCAN_ROW_US;
+            if (nowUs > rowScheduler.slotStartUs)
+            {
+              rowScheduler.slotStartUs = nowUs;
+              rowScheduler.overruns++;
+            }
+            rowScheduler.nextRow = static_cast<uint8_t>((rowScheduler.activeRow + 1U) % SR_ROW_COUNT);
+            activeRow = rowScheduler.nextRow;
+            rowScheduler.phase = RowPhase::Blank;
+            rowScheduler.phaseDeadlineUs = rowScheduler.slotStartUs + ROW_BLANK_US;
+            break;
+          }
+        }
       }
 
-      activeCol = 0;
       attractStep = 0;
-      const uint8_t rowByte = static_cast<uint8_t>(1U << activeRow);
-      activeFrame = sr_compose_frame(rowByte, 0x00);
-      lampPulseOn = true;
-      sr_shift_frame(activeFrame);
     }
 
     const int sw0 = gpio_get_level(PIN_SW_COL0);
@@ -1373,20 +1476,20 @@ extern "C" void app_main(void)
       prevSw3 = sw3;
     }
 
-    if ((kRuntimeMode == RuntimeMode::SwitchScan) && rowSampleTick)
+    if ((kRuntimeMode != RuntimeMode::LampAttract) && rowSampleTick)
     {
       const bool swActive0 = SW_ACTIVE_LOW ? (sw0 == 0) : (sw0 != 0);
       const bool swActive1 = SW_ACTIVE_LOW ? (sw1 == 0) : (sw1 != 0);
       const bool swActive2 = SW_ACTIVE_LOW ? (sw2 == 0) : (sw2 != 0);
       const bool swActive3 = SW_ACTIVE_LOW ? (sw3 == 0) : (sw3 != 0);
-      swState[activeRow][0] = swActive0;
-      swState[activeRow][1] = swActive1;
-      swState[activeRow][2] = swActive2;
-      swState[activeRow][3] = swActive3;
-      if (swActive0) ++swHits[activeRow][0];
-      if (swActive1) ++swHits[activeRow][1];
-      if (swActive2) ++swHits[activeRow][2];
-      if (swActive3) ++swHits[activeRow][3];
+      swState[sampledRow][0] = swActive0;
+      swState[sampledRow][1] = swActive1;
+      swState[sampledRow][2] = swActive2;
+      swState[sampledRow][3] = swActive3;
+      if (swActive0) ++swHits[sampledRow][0];
+      if (swActive1) ++swHits[sampledRow][1];
+      if (swActive2) ++swHits[sampledRow][2];
+      if (swActive3) ++swHits[sampledRow][3];
       if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
       {
         matrix_pack_switch_bytes(swState);
@@ -1440,8 +1543,8 @@ extern "C" void app_main(void)
                   sw2,
                   sw3,
                   static_cast<unsigned>(activeRow),
-                  static_cast<unsigned>(activeCol),
-                  static_cast<unsigned>(lampPulseOn ? activeFrame : offFrame));
+                  static_cast<unsigned>(activeColByte),
+                  static_cast<unsigned>(activeFrame));
       if (kRuntimeMode == RuntimeMode::LampAttract)
       {
         std::printf("       ATTRACT step=%u lamp=(r%u,c%u->LD%u) slot=%lums on=%lums\n",
@@ -1462,6 +1565,17 @@ extern "C" void app_main(void)
                     static_cast<unsigned long>(swHits[activeRow][1]),
                     static_cast<unsigned long>(swHits[activeRow][2]),
                     static_cast<unsigned long>(swHits[activeRow][3]));
+        if (kRuntimeMode == RuntimeMode::I2cSlaveRegmap)
+        {
+          std::printf("       ROW_SCHED phase=%u active=%u next=%u overruns=%lu blank=%luus settle=%luus off=%luus\n",
+                      static_cast<unsigned>(rowScheduler.phase),
+                      static_cast<unsigned>(rowScheduler.activeRow),
+                      static_cast<unsigned>(rowScheduler.nextRow),
+                      static_cast<unsigned long>(rowScheduler.overruns),
+                      static_cast<unsigned long>(ROW_BLANK_US),
+                      static_cast<unsigned long>(ROW_SETTLE_US),
+                      static_cast<unsigned long>(ROW_OFF_DEADTIME_US));
+        }
       }
       std::printf("       SW_EDGE/s: %lu %lu %lu %lu\n",
           static_cast<unsigned long>(sw0Edges),
@@ -1569,6 +1683,25 @@ extern "C" void app_main(void)
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(10));
+    if (kRuntimeMode == RuntimeMode::LampAttract)
+    {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    else
+    {
+      const uint64_t sleepNowUs = static_cast<uint64_t>(esp_timer_get_time());
+      if (rowScheduler.phaseDeadlineUs > sleepNowUs)
+      {
+        const uint64_t remainingUs = rowScheduler.phaseDeadlineUs - sleepNowUs;
+        if (remainingUs > 1000U)
+        {
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
+        else if (remainingUs > 25U)
+        {
+          esp_rom_delay_us(static_cast<uint32_t>(remainingUs - 10U));
+        }
+      }
+    }
   }
 }
